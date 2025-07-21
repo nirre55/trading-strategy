@@ -209,3 +209,12 @@ __marimo__/
 
 # Local test files
 temp/*
+
+# csv files
+*.csv
+
+# JSON files
+*.json
+
+# txt files
+*.txt

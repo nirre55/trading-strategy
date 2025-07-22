@@ -2,7 +2,7 @@ import pandas as pd
 from datetime import datetime
 
 
-tp_ratio = 1.2 # Ratio pour le Take Profit
+tp_ratio = 0.5 # Ratio pour le Take Profit
 
 # === Charger le fichier CSV ===
 def load_csv(filepath):
@@ -80,7 +80,7 @@ def run_backtest(df):
         if pending_long and row['HA_close'] > row['HA_open']:
             entry = next_row['open']
             sl = row['HA_low'] * (1 - 0.001)
-            tp = entry + (entry - sl) * 1.2
+            tp = entry + (entry - sl) * tp_ratio
             result, timestamp_close = simulate_trade(df, i + 1, entry, sl, tp, long=True)
             trades.append(result)
             logs.append({
@@ -97,7 +97,7 @@ def run_backtest(df):
         if pending_short and row['HA_close'] < row['HA_open']:
             entry = next_row['open']
             sl = row['HA_high'] * (1 + 0.001)
-            tp = entry - (sl - entry) * 1.2
+            tp = entry - (sl - entry) * tp_ratio
             result, timestamp_close = simulate_trade(df, i + 1, entry, sl, tp, long=False)
             trades.append(result)
             logs.append({
@@ -116,35 +116,69 @@ def run_backtest(df):
 
 
 # === Statistiques ===
-def print_stats(trades):
-    closed_trades = [t for t in trades if t in ('win', 'loss')]
-    wins = closed_trades.count('win')
-    losses = closed_trades.count('loss')
-    total = len(closed_trades)
-    winrate = (wins / total * 100) if total > 0 else 0
+def print_stats(trades, base_risk=20, reset_after_win_streak=4):
+    capital = 1000
+    current_risk = base_risk
+    win_streak_counter = 0
+    
+    capital_peak = capital
+    max_drawdown = 0.0
 
+    wins = losses = 0
     max_win_streak = max_loss_streak = 0
     current_win = current_loss = 0
-    for t in closed_trades:
+
+    for t in trades:
+        if capital <= 0:
+            break
+
         if t == 'win':
+            profit = current_risk * 1.2
+            capital += profit
+            wins += 1
             current_win += 1
             current_loss = 0
-        else:
+
+            win_streak_counter += 1
+            if win_streak_counter >= reset_after_win_streak:
+                current_risk = base_risk
+                win_streak_counter = 0
+            else:
+                current_risk *= 2
+
+        elif t == 'loss':
+            capital -= current_risk
+            losses += 1
             current_loss += 1
             current_win = 0
+
+            current_risk = base_risk
+            win_streak_counter = 0
+
         max_win_streak = max(max_win_streak, current_win)
         max_loss_streak = max(max_loss_streak, current_loss)
+        
+        capital_peak = max(capital_peak, capital)
+        drawdown = capital_peak - capital
+        max_drawdown = max(max_drawdown, drawdown)
 
-    print("\n=== Résultats Backtest ===")
+    total = wins + losses
+    winrate = (wins / total * 100) if total > 0 else 0
+
+    print("\n=== Résultats Backtest avec Martingale Inversée (x2 sur Win, Reset après 5) ===")
     print(f"Total Trades   : {total}")
     print(f"Wins           : {wins}")
     print(f"Losses         : {losses}")
     print(f"Winrate (%)    : {winrate:.2f}")
     print(f"Max Win Streak : {max_win_streak}")
     print(f"Max Loss Streak: {max_loss_streak}")
+    print(f"Capital final  : {capital:.2f} $")
+    print(f"Profit net     : {capital - 1000:.2f} $")
+    print(f"Max Drawdown   : {max_drawdown:.2f} $")
+
 
 def main():
-    file_path = r"C:\Users\Oulmi\OneDrive\Bureau\DEV\trading-strategy\backtest\BTCUSDT_5m_2025_6_30_to_2025_7_21.csv"
+    file_path = r"C:\Users\Oulmi\OneDrive\Bureau\DEV\trading-strategy\backtest\BTCUSDT_5m_2020_1_1_to_2025_7_21.csv"
     df = load_csv(file_path)
     df = compute_heikin_ashi(df)
     df['RSI_5'] = calculate_rsi(df['HA_close'], 5).round(2)

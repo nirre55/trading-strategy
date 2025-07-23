@@ -5,24 +5,41 @@ Configuration pour le trading live sur Binance Futures
 import os
 from datetime import datetime
 
+
+
+def load_api_credentials_from_env(key_name, filename=".env"):
+    env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), filename)
+    if not os.path.exists(env_path):
+        raise FileNotFoundError(f"Fichier .env non trouvé à l'emplacement : {env_path}")
+    
+    with open(env_path, "r") as file:
+        for line in file:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if f"{key_name}=" in line:
+                return line.split("=", 1)[1].strip()
+    
+    raise ValueError(f"Clé '{key_name}' manquante dans le fichier .env")
+
 # Configuration de l'environnement
 ENVIRONMENT = {
     "mode": "live",  # "testnet" ou "live" 
-    "log_level": "INFO",  # DEBUG, INFO, WARNING, ERROR
+    "log_level": "DEBUG",  # DEBUG, INFO, WARNING, ERROR
     "auto_trade": False,  # False = surveillance seulement, True = trading auto
 }
 
 # Clés API Binance (à définir dans les variables d'environnement)
 API_CONFIG = {
-    "api_key": os.getenv("BINANCE_API_KEY", ""),
-    "api_secret": os.getenv("BINANCE_API_SECRET", ""),
+    "api_key": load_api_credentials_from_env("BINANCE_API_KEY"),
+    "api_secret": load_api_credentials_from_env("BINANCE_API_SECRET"),
     "testnet": ENVIRONMENT["mode"] == "testnet"
 }
 
 # Configuration de trading
 TRADING_CONFIG = {
     # Paire de trading
-    "symbol": "BTCUSDT",
+    "symbol": "BTCUSDC",
     "timeframe": "5m",
     
     # Capital et gestion du risque
@@ -133,9 +150,3 @@ def validate_config():
     
     return errors
 
-# Configuration par défaut pour les tests
-DEFAULT_TEST_CONFIG = {
-    "symbol": "BTCUSDT",
-    "position_size": 10,  # USDT
-    "max_test_duration": 3600,  # 1 heure de test max
-}

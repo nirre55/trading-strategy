@@ -77,15 +77,23 @@ class BinanceFuturesClient:
         
         return None, "Max retries exceeded"
     
-    def get_account_balance(self) -> Tuple[Optional[float], Optional[str]]:
-        """Récupère le solde du compte"""
+    def get_account_balance(self, asset: str = "USDT") -> Tuple[Optional[float], Optional[str]]:
+        """Récupère le solde du compte pour un asset spécifique"""
         result, error = self._execute_request(self.client.futures_account)
         if error:
             return None, str(error)
         
         try:
-            balance = float(result['totalWalletBalance'])
-            return balance, None
+            # Recherche du solde pour l'asset spécifique
+            for balance in result.get('assets', []):
+                if balance['asset'] == asset:
+                    # Retourne le solde disponible (walletBalance)
+                    wallet_balance = float(balance['walletBalance'])
+                    return wallet_balance, None
+            
+            # Si l'asset n'est pas trouvé
+            return 0.0, f"Asset {asset} non trouvé"
+            
         except (KeyError, ValueError) as e:
             return None, f"Erreur parsing balance: {e}"
     

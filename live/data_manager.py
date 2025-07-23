@@ -55,25 +55,32 @@ class RealTimeDataManager:
         """Ajoute un callback appelé à chaque mise à jour de prix"""
         self.on_price_update_callbacks.append(callback)
     
-    def initialize_data(self, lookback_candles: int = 500):
-        """Initialise les données historiques"""
+    def initialize_data(self, lookback_candles: int = 200):
+        """Initialise les données historiques avec timeout réduit"""
         try:
             logger.info(f"📊 Initialisation des données {self.symbol} {self.timeframe}...")
             
-            # Récupération des données historiques
+            # Récupération des données historiques avec timeout réduit
+            logger.debug("Appel API get_klines...")
             klines, error = self.client.get_klines(
                 symbol=self.symbol,
                 interval=self.timeframe,
-                limit=lookback_candles
+                limit=lookback_candles  # Réduit de 500 à 200 pour être plus rapide
             )
             
             if error:
                 logger.error(f"❌ Erreur récupération données: {error}")
                 return False
             
+            logger.debug(f"✅ {len(klines)} klines reçues")
+            
             # Conversion en DataFrame
+            logger.debug("Conversion en DataFrame...")
             df_data = []
-            for kline in klines:
+            for i, kline in enumerate(klines):
+                if i % 50 == 0:  # Log de progression
+                    logger.debug(f"Traitement kline {i}/{len(klines)}")
+                
                 df_data.append({
                     'timestamp': pd.to_datetime(kline[0], unit='ms'),
                     'open': float(kline[1]),
@@ -83,9 +90,11 @@ class RealTimeDataManager:
                     'volume': float(kline[5])
                 })
             
+            logger.debug("Création DataFrame...")
             with self.data_lock:
                 self.candles_df = pd.DataFrame(df_data)
                 self.candles_df.set_index('timestamp', inplace=True)
+                logger.debug("Calcul des indicateurs...")
                 self.calculate_indicators()
             
             logger.info(f"✅ {len(self.candles_df)} bougies historiques chargées")
@@ -93,55 +102,123 @@ class RealTimeDataManager:
             
         except Exception as e:
             logger.error(f"❌ Erreur initialisation données: {e}")
+            import traceback
+            logger.debug(traceback.format_exc())
             return False
     
     def calculate_indicators(self):
-        """Calcule tous les indicateurs techniques"""
+        """Calcule tous les indicateurs techniques - Version SANS THREADING"""
         if len(self.candles_df) < 50:
+            logger.debug("Pas assez de données pour les indicateurs")
             return
         
         try:
-            # Importation des fonctions d'indicateurs du backtest
+            logger.debug("Import des fonctions d'indicateurs...")
+            
+            # Ajout du chemin vers le dossier backtest
+            import sys
+            from pathlib import Path
+            backtest_path = Path(__file__).parent.parent / "backtest"
+            if str(backtest_path) not in sys.path:
+                sys.path.insert(0, str(backtest_path))
+            
+            # Import simple
             from indicators import (
                 calculate_rsi, compute_heikin_ashi, 
-                compute_trend_indicators, calculate_mtf_rsi
+                compute_trend_indicators
             )
+            logger.debug("✅ Import indicators OK")
             
-            # Calcul des indicateurs (réutilise le code du backtest)
+            # Copie des données
+            logger.debug("Copie des données...")
             df_copy = self.candles_df.copy()
+            logger.debug(f"Données copiées: {len(df_copy)} lignes")
             
-            # Trend indicators
+            # Calculs step by step
+            logger.debug("Calcul trend indicators...")
             df_copy = compute_trend_indicators(df_copy, ema_period=200, slope_lookback=5)
+            logger.debug(f"✅ EMA calculée: {df_copy['EMA'].iloc[-1]:.2f}")
             
-            # Heikin Ashi
+            logger.debug("Calcul Heikin Ashi...")
             df_copy = compute_heikin_ashi(df_copy)
+            logger.debug(f"✅ HA calculé: {df_copy['HA_close'].iloc[-1]:.2f}")
             
-            # RSI multiples
+            logger.debug("Calcul RSI multiples...")
             df_copy['RSI_5'] = calculate_rsi(df_copy['HA_close'], 5).round(2)
             df_copy['RSI_14'] = calculate_rsi(df_copy['HA_close'], 14).round(2)
             df_copy['RSI_21'] = calculate_rsi(df_copy['HA_close'], 21).round(2)
+            logger.debug(f"✅ RSI calculés: {df_copy['RSI_14'].iloc[-1]:.1f}")
             
-            # RSI Multi-timeframe (approximation sur même timeframe pour live)
+            logger.debug("Calcul RSI MTF...")
             df_copy['RSI_mtf'] = calculate_rsi(df_copy['close'], 14).round(2)
+            logger.debug(f"✅ RSI MTF: {df_copy['RSI_mtf'].iloc[-1]:.1f}")
             
-            # Mise à jour thread-safe
-            with self.data_lock:
-                self.candles_df = df_copy
-                self.indicators = {
-                    'RSI_5': df_copy['RSI_5'].iloc[-1] if len(df_copy) > 0 else 0,
-                    'RSI_14': df_copy['RSI_14'].iloc[-1] if len(df_copy) > 0 else 0,
-                    'RSI_21': df_copy['RSI_21'].iloc[-1] if len(df_copy) > 0 else 0,
-                    'RSI_mtf': df_copy['RSI_mtf'].iloc[-1] if len(df_copy) > 0 else 0,
-                    'HA_close': df_copy['HA_close'].iloc[-1] if len(df_copy) > 0 else 0,
-                    'HA_open': df_copy['HA_open'].iloc[-1] if len(df_copy) > 0 else 0,
-                    'HA_high': df_copy['HA_high'].iloc[-1] if len(df_copy) > 0 else 0,
-                    'HA_low': df_copy['HA_low'].iloc[-1] if len(df_copy) > 0 else 0,
-                    'EMA': df_copy['EMA'].iloc[-1] if len(df_copy) > 0 else 0,
-                    'EMA_slope': df_copy['EMA_slope'].iloc[-1] if len(df_copy) > 0 else 0,
-                }
+            # Préparation des indicateurs
+            logger.debug("Préparation des indicateurs...")
+            new_indicators = {
+                'RSI_5': float(df_copy['RSI_5'].iloc[-1]),
+                'RSI_14': float(df_copy['RSI_14'].iloc[-1]),
+                'RSI_21': float(df_copy['RSI_21'].iloc[-1]),
+                'RSI_mtf': float(df_copy['RSI_mtf'].iloc[-1]),
+                'HA_close': float(df_copy['HA_close'].iloc[-1]),
+                'HA_open': float(df_copy['HA_open'].iloc[-1]),
+                'HA_high': float(df_copy['HA_high'].iloc[-1]),
+                'HA_low': float(df_copy['HA_low'].iloc[-1]),
+                'EMA': float(df_copy['EMA'].iloc[-1]),
+                'EMA_slope': float(df_copy['EMA_slope'].iloc[-1]),
+                'close': float(df_copy['close'].iloc[-1]),
+            }
+            logger.debug("✅ Indicateurs préparés")
+            
+            # Mise à jour DIRECTE (sans lock pour éviter deadlock)
+            logger.debug("Mise à jour directe...")
+            self.candles_df = df_copy
+            self.indicators = new_indicators
+            logger.debug("✅ Mise à jour directe terminée")
+            
+            logger.debug("✅ Indicateurs calculés avec succès")
+            logger.info(f"📊 Indicateurs mis à jour - RSI14: {self.indicators['RSI_14']:.1f}")
             
         except Exception as e:
             logger.error(f"❌ Erreur calcul indicateurs: {e}")
+            import traceback
+            logger.debug(traceback.format_exc())
+            
+            # Fallback simple
+            self._set_default_indicators()
+    
+    def _set_default_indicators(self):
+        """Définit des indicateurs par défaut en cas d'erreur"""
+        logger.warning("🔄 Utilisation d'indicateurs par défaut")
+        try:
+            if len(self.candles_df) > 0:
+                last_close = float(self.candles_df['close'].iloc[-1])
+            else:
+                last_close = 40000.0  # Valeur par défaut
+            
+            default_indicators = {
+                'RSI_5': 50.0,
+                'RSI_14': 50.0,
+                'RSI_21': 50.0,
+                'RSI_mtf': 50.0,
+                'HA_close': last_close,
+                'HA_open': last_close,
+                'HA_high': last_close,
+                'HA_low': last_close,
+                'EMA': last_close,
+                'EMA_slope': 0.0,
+                'close': last_close,
+            }
+            
+            # Mise à jour directe
+            self.indicators = default_indicators
+            logger.info("✅ Indicateurs par défaut définis")
+            
+        except Exception as e:
+            logger.error(f"❌ Erreur fallback: {e}")
+            self.indicators = {k: 0.0 for k in ['RSI_5', 'RSI_14', 'RSI_21', 'RSI_mtf', 
+                                               'HA_close', 'HA_open', 'HA_high', 'HA_low', 
+                                               'EMA', 'EMA_slope', 'close']}
     
     def start_websocket(self):
         """Démarre le WebSocket pour les données temps réel"""
@@ -218,7 +295,7 @@ class RealTimeDataManager:
             logger.error(f"❌ Erreur traitement message WebSocket: {e}")
     
     def _process_closed_candle(self):
-        """Traite une bougie fermée"""
+        """Traite une bougie fermée - SANS LOCK"""
         try:
             new_candle = pd.DataFrame([{
                 'timestamp': self.current_candle['timestamp'],
@@ -230,16 +307,15 @@ class RealTimeDataManager:
             }])
             new_candle.set_index('timestamp', inplace=True)
             
-            with self.data_lock:
-                # Ajout de la nouvelle bougie
-                self.candles_df = pd.concat([self.candles_df, new_candle])
-                
-                # Limitation de l'historique (garde 1000 bougies max)
-                if len(self.candles_df) > 1000:
-                    self.candles_df = self.candles_df.tail(1000)
-                
-                # Recalcul des indicateurs
-                self.calculate_indicators()
+            # Ajout de la nouvelle bougie SANS LOCK
+            self.candles_df = pd.concat([self.candles_df, new_candle])
+            
+            # Limitation de l'historique (garde 1000 bougies max)
+            if len(self.candles_df) > 1000:
+                self.candles_df = self.candles_df.tail(1000)
+            
+            # Recalcul des indicateurs
+            self.calculate_indicators()
             
             logger.info(f"📊 Nouvelle bougie: {self.current_candle['close']:.1f} USDT")
             
@@ -279,11 +355,11 @@ class RealTimeDataManager:
             logger.info("🔌 WebSocket fermé")
     
     def get_latest_data(self) -> Optional[Dict]:
-        """Récupère les dernières données avec indicateurs"""
-        with self.data_lock:
-            if len(self.candles_df) == 0:
-                return None
-            
+        """Récupère les dernières données avec indicateurs - SANS LOCK"""
+        if len(self.candles_df) == 0:
+            return None
+        
+        try:
             latest_row = self.candles_df.iloc[-1]
             
             return {
@@ -293,9 +369,12 @@ class RealTimeDataManager:
                 'low': latest_row['low'],
                 'close': latest_row['close'],
                 'volume': latest_row['volume'],
-                'indicators': self.indicators.copy(),
+                'indicators': self.indicators.copy() if self.indicators else {},
                 'current_price': self.current_candle.get('close', latest_row['close'])
             }
+        except Exception as e:
+            logger.error(f"❌ Erreur get_latest_data: {e}")
+            return None
     
     def get_connection_status(self) -> Dict:
         """Vérifie le statut de la connexion données"""

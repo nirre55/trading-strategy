@@ -96,12 +96,20 @@ class LiveTradingEngine:
                 safety_limits=SAFETY_LIMITS
             )
             
-            # Mise à jour du solde initial
-            balance, error = self.binance_client.get_account_balance()
+            # Mise à jour du solde initial pour USDC
+            balance, error = self.binance_client.get_account_balance("USDC")
             if not error:
                 self.risk_manager.update_balance(balance)
+                logger.info(f"💰 Solde USDC détecté: {balance:.2f} USDC")
             else:
-                logger.warning(f"⚠️ Impossible de récupérer le solde: {error}")
+                logger.warning(f"⚠️ Impossible de récupérer le solde USDC: {error}")
+                # Fallback vers USDT
+                balance_usdt, error_usdt = self.binance_client.get_account_balance("USDT")
+                if not error_usdt:
+                    self.risk_manager.update_balance(balance_usdt)
+                    logger.info(f"💰 Solde USDT détecté: {balance_usdt:.2f} USDT")
+                else:
+                    logger.warning(f"⚠️ Impossible de récupérer le solde: {error_usdt}")
             
             # 5. Gestionnaire d'ordres
             logger.info("📋 Initialisation gestionnaire d'ordres...")
@@ -241,8 +249,20 @@ class LiveTradingEngine:
         """Boucle principale du moteur"""
         logger.info("🔄 Boucle principale démarrée")
         
+        # Gestion du timeout de test
+        start_time = time.time()
+        max_duration = ENVIRONMENT.get("max_test_duration", 0)
+        
         while self.running:
             try:
+                # Vérification timeout de test
+                if max_duration > 0:
+                    elapsed = time.time() - start_time
+                    if elapsed > max_duration:
+                        logger.info(f"⏰ Durée de test maximale atteinte: {max_duration/3600:.1f}h")
+                        self.stop("Timeout de test atteint")
+                        break
+                
                 # Vérification de l'état d'urgence
                 if self.emergency_stop:
                     logger.critical("🚨 Mode d'urgence actif")
@@ -396,10 +416,19 @@ class LiveTradingEngine:
     def _update_balance(self):
         """Met à jour le solde du compte"""
         try:
-            balance, error = self.binance_client.get_account_balance()
+            # Récupération du solde USDC pour BTCUSDC
+            balance, error = self.binance_client.get_account_balance("USDC")
             if not error:
                 self.risk_manager.update_balance(balance)
                 self.system_health['balance'] = balance
+                self.system_health['currency'] = 'USDC'
+            else:
+                # Fallback vers USDT si USDC échoue
+                balance_usdt, error_usdt = self.binance_client.get_account_balance("USDT")
+                if not error_usdt:
+                    self.risk_manager.update_balance(balance_usdt)
+                    self.system_health['balance'] = balance_usdt
+                    self.system_health['currency'] = 'USDT'
             
         except Exception as e:
             logger.error(f"❌ Erreur mise à jour solde: {e}")
@@ -456,13 +485,15 @@ class LiveTradingEngine:
         # État des trades
         trades_summary = self.order_manager.get_active_trades_summary() if self.order_manager else {}
         
+        currency = self.system_health.get('currency', 'USDT')
+        
         report = f"""
 🤖 TRADING BOT - {status}
 ⏰ {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}
 
 💰 FINANCIAL:
-• Balance: {self.system_health.get('balance', 0):.2f} USDT
-• PnL Jour: {daily_stats.get('daily_pnl', 0):+.2f} USDT
+• Balance: {self.system_health.get('balance', 0):.2f} {currency}
+• PnL Jour: {daily_stats.get('daily_pnl', 0):+.2f} {currency}
 • Trades Jour: {daily_stats.get('daily_trades', 0)}
 • Trades Actifs: {trades_summary.get('total_active', 0)}
 

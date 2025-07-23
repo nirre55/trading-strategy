@@ -403,7 +403,7 @@ class CandleColorDetector:
                         }
                         
                         self.log_trade_event("ENTRÉE LONG CONFIRMÉE", {
-                            "Signal RSI": f"RSI(5)={self.pending_long_signal['rsi_5']:.1f}, RSI(14)={self.pending_long_signal['rsi_14']:.1f}, RSI(21)={self.pending_long_signal['rsi_21']:.1f}",
+                            "Signal RSI": f"RSI(5)={self.pending_long_signal['rsi_5']:.1f}, RSI(14)={self.pending_long_signal['rsi_14']:.1f}, RSI(21)={self.pending_long_signal['rsi_21']:.1f}", # type: ignore
                             "Confirmation HA": f"HA Close ({ha_data['ha_close']:.2f}) > HA Open ({ha_data['ha_open']:.2f})",
                             "Prix d'entrée": f"${entry_price:,.2f}",
                             "Stop Loss": f"${levels['stop_loss']:,.2f}",
@@ -444,7 +444,7 @@ class CandleColorDetector:
                         }
                         
                         self.log_trade_event("ENTRÉE SHORT CONFIRMÉE", {
-                            "Signal RSI": f"RSI(5)={self.pending_short_signal['rsi_5']:.1f}, RSI(14)={self.pending_short_signal['rsi_14']:.1f}, RSI(21)={self.pending_short_signal['rsi_21']:.1f}",
+                            "Signal RSI": f"RSI(5)={self.pending_short_signal['rsi_5']:.1f}, RSI(14)={self.pending_short_signal['rsi_14']:.1f}, RSI(21)={self.pending_short_signal['rsi_21']:.1f}", # type: ignore
                             "Confirmation HA": f"HA Close ({ha_data['ha_close']:.2f}) < HA Open ({ha_data['ha_open']:.2f})",
                             "Prix d'entrée": f"${entry_price:,.2f}",
                             "Stop Loss": f"${levels['stop_loss']:,.2f}",

@@ -23,6 +23,9 @@ class BacktestEngine:
         self.pending_long = False
         self.pending_short = False
         self.trade_manager.reset()
+        # Timestamps pour traçage des signaux
+        self.rsi_signal_timestamp_long = None
+        self.rsi_signal_timestamp_short = None
     
     def run_backtest(self, df):
         """
@@ -38,14 +41,19 @@ class BacktestEngine:
             row = df.iloc[i]
             next_row = df.iloc[i + 1]
             timestamp = df.index[i + 1]
+            current_timestamp = df.index[i]
 
             # DÉTECTION DES SIGNAUX RSI (base de la stratégie) - LOGIQUE ORIGINALE
             from signals import rsi_condition, ha_confirmation, trend_filter, multi_tf_rsi_filter
             
             if rsi_condition(row, 'long'):
                 self.pending_long = True
+                self.rsi_signal_timestamp_long = current_timestamp
+                # Pas d'affichage console - seulement sauvegarde du timestamp
             elif rsi_condition(row, 'short'):
                 self.pending_short = True
+                self.rsi_signal_timestamp_short = current_timestamp
+                # Pas d'affichage console - seulement sauvegarde du timestamp
 
             # EXÉCUTION LONG - LOGIQUE ORIGINALE EXACTE
             if (
@@ -54,8 +62,11 @@ class BacktestEngine:
                 and (not self.filters_config.get("filter_trend", False) or trend_filter(row, 'long'))
                 and (not self.filters_config.get("filter_mtf_rsi", False) or multi_tf_rsi_filter(row, 'long'))
             ):
+                # Pas d'affichage console - données sauvegardées dans les logs
                 self._execute_trade(row, next_row, timestamp, df, i, 'long')
                 self.pending_long = False
+                if hasattr(self, 'rsi_signal_timestamp_long'):
+                    delattr(self, 'rsi_signal_timestamp_long')
 
             # EXÉCUTION SHORT - LOGIQUE ORIGINALE EXACTE
             if (
@@ -64,8 +75,11 @@ class BacktestEngine:
                 and (not self.filters_config.get("filter_trend", False) or trend_filter(row, 'short'))
                 and (not self.filters_config.get("filter_mtf_rsi", False) or multi_tf_rsi_filter(row, 'short'))
             ):
+                # Pas d'affichage console - données sauvegardées dans les logs
                 self._execute_trade(row, next_row, timestamp, df, i, 'short')
                 self.pending_short = False
+                if hasattr(self, 'rsi_signal_timestamp_short'):
+                    delattr(self, 'rsi_signal_timestamp_short')
         
         return self.trades, self.logs, self.trade_manager.max_drawdown
     
@@ -119,10 +133,27 @@ class BacktestEngine:
         pnl = self.trade_manager.update_capital(result, position_size)
         self.trade_manager.update_position_size(result)
         
-        # Enregistrement du trade
+        # Récupération du timestamp du signal RSI initial
+        rsi_timestamp = None
+        if direction == 'long' and hasattr(self, 'rsi_signal_timestamp_long'):
+            rsi_timestamp = self.rsi_signal_timestamp_long
+        elif direction == 'short' and hasattr(self, 'rsi_signal_timestamp_short'):
+            rsi_timestamp = self.rsi_signal_timestamp_short
+        
+        # Enregistrement du trade avec timestamps détaillés pour le CSV
         self.trades.append(result)
+        
+        # Calcul du temps d'attente en minutes pour faciliter l'analyse
+        wait_time_minutes = None
+        if rsi_timestamp:
+            wait_time_timedelta = df.index[i] - rsi_timestamp
+            wait_time_minutes = wait_time_timedelta.total_seconds() / 60  # En minutes
+        
         self.logs.append({
             "timestamp": timestamp,
+            "rsi_signal_timestamp": rsi_timestamp,
+            "validation_timestamp": df.index[i],
+            "wait_time_minutes": round(wait_time_minutes, 1) if wait_time_minutes else None,
             "direction": direction.upper(),
             "entry_price": round(entry, 2),
             "sl": round(sl, 2),
@@ -131,8 +162,18 @@ class BacktestEngine:
             "timestamp_close": timestamp_close,
             "position_size": round(position_size, 2),
             "pnl": round(pnl, 2),
-            "capital": round(self.trade_manager.capital, 2)
+            "capital": round(self.trade_manager.capital, 2),
+            # Ajout des valeurs des indicateurs au moment de la validation
+            "rsi_5": round(row.get('RSI_5', 0), 2),
+            "rsi_14": round(row.get('RSI_14', 0), 2),
+            "rsi_21": round(row.get('RSI_21', 0), 2),
+            "rsi_mtf": round(row.get('RSI_mtf', 0), 2),
+            "ha_close": round(row.get('HA_close', 0), 2),
+            "ha_open": round(row.get('HA_open', 0), 2),
+            "ha_direction": "GREEN" if row.get('HA_close', 0) > row.get('HA_open', 0) else "RED"
         })
+        
+        # Pas d'affichage console - console reste propre
 
 def run_backtest(df, config, filters_config):
     """

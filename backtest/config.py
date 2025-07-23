@@ -26,10 +26,7 @@ CONFIG = {
 
     # SL/TP
     "sl_buffer_pct": 0.001,
-    "tp_ratio": 0.5,
-    
-    # Mode de fonctionnement
-    "use_direct_calls": False  # True = appels directs (original), False = check_signal_conditions
+    "tp_ratio": 0.5
 }
 
 # Configuration centralisée pour activer/désactiver les filtres

@@ -26,7 +26,7 @@ def load_api_credentials_from_env(key_name, filename=".env"):
 ENVIRONMENT = {
     "mode": "live",  # "testnet" ou "live" 
     "log_level": "DEBUG",  # DEBUG, INFO, WARNING, ERROR
-    "auto_trade": False,  # False = surveillance seulement, True = trading auto
+    "auto_trade": True,  # False = surveillance seulement, True = trading auto
 }
 
 # Clés API Binance (à définir dans les variables d'environnement)

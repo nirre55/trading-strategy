@@ -150,7 +150,7 @@ class RealTimeDataManager:
             logger.debug(f"✅ RSI calculés: {df_copy['RSI_14'].iloc[-1]:.1f}")
             
             logger.debug("Calcul RSI MTF...")
-            df_copy['RSI_mtf'] = calculate_mtf_rsi(df_copy['HA_close'], 14).round(2)
+            df_copy['RSI_mtf'] = calculate_mtf_rsi(df_copy, 14).round(2)
             logger.debug(f"✅ RSI MTF: {df_copy['RSI_mtf'].iloc[-1]:.1f}")
             
             # Préparation des indicateurs

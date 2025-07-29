@@ -13,12 +13,12 @@ CONFIG = {
     "martingale_enabled": True,
     "martingale_type": "none",   # Options: "normal", "reverse", "none"
     "martingale_multiplier": 2.0,
-    "win_streak_max": 3,
+    "win_streak_max": 20,
 
     # RSI
     "rsi_periods": [5, 14, 21],
     "rsi_mtf_period": 14,
-    "rsi_mtf_tf": "15min",
+    "rsi_mtf_tf": "5min",
 
     # EMA
     "ema_period": 200,
@@ -26,7 +26,7 @@ CONFIG = {
 
     # SL/TP
     "sl_buffer_pct": 0.001,
-    "tp_ratio": 0.5
+    "tp_ratio": 0.3
 }
 
 # Configuration centralisée pour activer/désactiver les filtres

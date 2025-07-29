@@ -218,3 +218,5 @@ temp/*
 
 # txt files
 *.txt
+
+live_test/*

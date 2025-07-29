@@ -337,7 +337,7 @@ class LiveTradingEngine:
         logger.info(f"📊 RSI {direction} détecté - En attente de confirmation")
     
     def _execute_signal(self, signal):
-        """Exécute un signal de trading"""
+        """Exécute un signal de trading avec SL/TP corrigés et formatés"""
         try:
             # Validation du risque
             can_trade, reason = self.risk_manager.validate_trade(signal.confidence)
@@ -345,13 +345,61 @@ class LiveTradingEngine:
                 logger.warning(f"❌ Trade refusé: {reason}")
                 return
             
-            # Calcul de la taille de position
+            # 🔍 DIAGNOSTIC COMPLET SL - LONG ET SHORT
             current_price = signal.indicators.get('close', 0)
-            if signal.direction == "LONG":
-                stop_loss = signal.indicators.get('HA_low', current_price * 0.99)
-            else:
-                stop_loss = signal.indicators.get('HA_high', current_price * 1.01)
             
+            logger.info(f"🔍 === DIAGNOSTIC SL {signal.direction} ===")
+            logger.info(f"🔍 signal.indicators keys: {list(signal.indicators.keys())}")
+            logger.info(f"🔍 current_price (close): {current_price}")
+            logger.info(f"🔍 HA_high raw: {signal.indicators.get('HA_high')}")
+            logger.info(f"🔍 HA_low raw: {signal.indicators.get('HA_low')}")
+            logger.info(f"🔍 high raw: {signal.indicators.get('high')}")
+            logger.info(f"🔍 low raw: {signal.indicators.get('low')}")
+            
+            # 🔧 CALCUL SL CORRIGÉ avec buffer ET formatage
+            if signal.direction == "LONG":
+                # DIAGNOSTIC LONG
+                ha_low_value = signal.indicators.get('HA_low')
+                fallback_value = current_price * 0.99
+                
+                logger.info(f"🔍 LONG - HA_low exists: {ha_low_value is not None}")
+                logger.info(f"🔍 LONG - HA_low value: {ha_low_value}")
+                logger.info(f"🔍 LONG - Fallback value: {fallback_value}")
+                
+                # Calcul avec buffer
+                ha_low = signal.indicators.get('HA_low', fallback_value)
+                stop_loss_raw = ha_low * (1 - TRADING_CONFIG.get('sl_buffer_pct', 0.001))
+                
+                # 🆕 FORMATAGE BINANCE
+                stop_loss = self.binance_client.format_price(stop_loss_raw, TRADING_CONFIG["symbol"])
+                
+                logger.info(f"🔍 LONG - SL avant buffer: {ha_low}")
+                logger.info(f"🔍 LONG - SL avec buffer: {stop_loss_raw}")
+                logger.info(f"🔍 LONG - SL formaté final: {stop_loss}")
+                
+            else:  # SHORT
+                # DIAGNOSTIC SHORT
+                ha_high_value = signal.indicators.get('HA_high')
+                fallback_value = current_price * 1.01
+                
+                logger.info(f"🔍 SHORT - HA_high exists: {ha_high_value is not None}")
+                logger.info(f"🔍 SHORT - HA_high value: {ha_high_value}")
+                logger.info(f"🔍 SHORT - Fallback value: {fallback_value}")
+                
+                # Calcul avec buffer
+                ha_high = signal.indicators.get('HA_high', fallback_value)
+                stop_loss_raw = ha_high * (1 + TRADING_CONFIG.get('sl_buffer_pct', 0.001))
+                
+                # 🆕 FORMATAGE BINANCE
+                stop_loss = self.binance_client.format_price(stop_loss_raw, TRADING_CONFIG["symbol"])
+                
+                logger.info(f"🔍 SHORT - SL avant buffer: {ha_high}")
+                logger.info(f"🔍 SHORT - SL avec buffer: {stop_loss_raw}")
+                logger.info(f"🔍 SHORT - SL formaté final: {stop_loss}")
+            
+            logger.info(f"🔍 === FIN DIAGNOSTIC SL ===")
+            
+            # Calcul de la taille de position avec SL corrigé
             position_size = self.risk_manager.calculate_position_size(
                 entry_price=current_price,
                 stop_loss=stop_loss,
@@ -361,6 +409,16 @@ class LiveTradingEngine:
             if not position_size:
                 logger.warning("❌ Impossible de calculer la taille de position")
                 return
+            
+            # 🔍 DIAGNOSTIC POSITION SIZE
+            logger.info(f"🔍 === DIAGNOSTIC POSITION ===")
+            logger.info(f"🔍 Entry price utilisé: {current_price}")
+            logger.info(f"🔍 Stop loss utilisé: {stop_loss}")
+            logger.info(f"🔍 Direction: {signal.direction}")
+            logger.info(f"🔍 Position calculée - SL: {position_size.stop_loss}")
+            logger.info(f"🔍 Position calculée - TP: {position_size.take_profit}")
+            logger.info(f"🔍 Distance SL: {abs(current_price - stop_loss):.1f} USDT")
+            logger.info(f"🔍 === FIN DIAGNOSTIC POSITION ===")
             
             # Création du trade
             trade_id = self.order_manager.create_trade(
@@ -376,6 +434,8 @@ class LiveTradingEngine:
             
         except Exception as e:
             logger.error(f"❌ Erreur exécution signal: {e}")
+            import traceback
+            logger.debug(traceback.format_exc())
     
     def _on_trade_opened(self, trade):
         """Callback appelé quand un trade s'ouvre"""

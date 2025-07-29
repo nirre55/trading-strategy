@@ -45,7 +45,7 @@ TRADING_CONFIG = {
     # Capital et gestion du risque
     "max_balance_risk": 0.02,  # 2% du solde max par trade
     "min_position_size": 10,   # Position minimum en USDT
-    "max_position_size": 100,  # Position maximum en USDT
+    "max_position_size": 1000,  # Position maximum en USDT
     
     # Stratégie (reprend votre config backtest)
     "rsi_periods": [5, 14, 21],

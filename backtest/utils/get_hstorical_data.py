@@ -5,15 +5,15 @@ from datetime import datetime, timedelta
 
 # Configuration
 symbol = 'BTC/USDT'
-timeframe = '5m'
+timeframe = '1m'
 
 # Constantes pour les dates (année, mois, jour)
-START_YEAR = 2020
-START_MONTH = 1
-START_DAY = 1
+START_YEAR = 2025
+START_MONTH = 7
+START_DAY = 21
 END_YEAR = 2025
 END_MONTH = 7
-END_DAY = 21
+END_DAY = 28
 
 # Création des dates à partir des constantes
 start_date = datetime(START_YEAR, START_MONTH, START_DAY)

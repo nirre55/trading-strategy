@@ -13,6 +13,7 @@ from typing import Dict, List, Optional, Callable
 import websocket
 from queue import Queue
 from binance_client import BinanceFuturesClient
+from live.config_live import TRADING_CONFIG
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +47,12 @@ class RealTimeDataManager:
         # Dernière mise à jour
         self.last_update = None
         self.heartbeat_interval = 30  # secondes
-        
+
+        # 🆕 AJOUT: Variables pour RSI M15
+        self.last_m15_candle_time = None
+        self.cached_rsi_mtf = 50.0
+
+
     def add_candle_closed_callback(self, callback: Callable):
         """Ajoute un callback appelé à chaque fermeture de bougie"""
         self.on_candle_closed_callbacks.append(callback)
@@ -106,6 +112,97 @@ class RealTimeDataManager:
             logger.debug(traceback.format_exc())
             return False
     
+    def _get_m15_candles_direct(self, limit=20):
+        """
+        Récupère directement les bougies M15 via l'API Binance
+        """
+        try:
+            logger.debug(f"📡 Récupération {limit} bougies M15...")
+            
+            klines, error = self.client.get_klines(
+                symbol=self.symbol,
+                interval=TRADING_CONFIG["rsi_mtf_tf"],
+                limit=limit
+            )
+            
+            if error:
+                logger.error(f"❌ Erreur récupération M15: {error}")
+                return None
+            
+            # Conversion en DataFrame
+            df_data = []
+            for kline in klines:
+                df_data.append({
+                    'timestamp': pd.to_datetime(kline[0], unit='ms'),
+                    'open': float(kline[1]),
+                    'high': float(kline[2]),
+                    'low': float(kline[3]),
+                    'close': float(kline[4]),
+                    'volume': float(kline[5])
+                })
+            
+            df_m15 = pd.DataFrame(df_data)
+            df_m15.set_index('timestamp', inplace=True)
+            
+            logger.debug(f"✅ {len(df_m15)} bougies M15 récupérées")
+            logger.debug(f"    Dernière: {df_m15.index[-1]} = {df_m15['close'].iloc[-1]:.1f}")
+            
+            return df_m15
+            
+        except Exception as e:
+            logger.error(f"❌ Erreur récupération M15: {e}")
+            return None
+    
+    def _update_rsi_m15(self, calculate_rsi_func):
+        """
+        🎯 Fonction extraite pour calculer et mettre à jour le RSI M15
+        
+        Args:
+            calculate_rsi_func: Fonction calculate_rsi importée depuis indicators
+        
+        Returns:
+            float: Valeur RSI M15 actuelle
+        """
+        try:
+            # 1. Récupérer les bougies M15
+            df_m15 = self._get_m15_candles_direct(limit=50)
+            
+            if df_m15 is not None and len(df_m15) >= 14:
+                # 2. Calculer RSI directement sur les close M15
+                rsi_m15_series = calculate_rsi_func(df_m15['close'], 14)
+                
+                # 3. Prendre la dernière valeur
+                if not rsi_m15_series.empty and not pd.isna(rsi_m15_series.iloc[-1]):
+                    rsi_m15_value = float(rsi_m15_series.iloc[-1])
+                    
+                    # 4. Vérifier si c'est une nouvelle bougie M15
+                    latest_m15_timestamp = df_m15.index[-1]
+                    
+                    if self.last_m15_candle_time != latest_m15_timestamp:
+                        old_rsi = getattr(self, 'cached_rsi_mtf', 50.0)
+                        
+                        logger.info(f"🆕 RSI M15 mis à jour:")
+                        logger.info(f"    Bougie M15: {latest_m15_timestamp}")
+                        logger.info(f"    RSI: {old_rsi:.1f} → {rsi_m15_value:.1f}")
+                        
+                        self.cached_rsi_mtf = rsi_m15_value
+                        self.last_m15_candle_time = latest_m15_timestamp
+                    else:
+                        logger.debug(f"📌 RSI M15 inchangé: {self.cached_rsi_mtf:.1f}")
+                        rsi_m15_value = self.cached_rsi_mtf
+                else:
+                    logger.warning("⚠️ RSI M15 invalide")
+                    rsi_m15_value = getattr(self, 'cached_rsi_mtf', 50.0)
+            else:
+                logger.warning("⚠️ Pas assez de bougies M15")
+                rsi_m15_value = getattr(self, 'cached_rsi_mtf', 50.0)
+            
+            return rsi_m15_value
+            
+        except Exception as e:
+            logger.error(f"❌ Erreur calcul RSI M15: {e}")
+            return getattr(self, 'cached_rsi_mtf', 50.0)
+    
     def calculate_indicators(self):
         """Calcule tous les indicateurs techniques - Version SANS THREADING"""
         if len(self.candles_df) < 50:
@@ -125,7 +222,7 @@ class RealTimeDataManager:
             # Import simple
             from indicators import (
                 calculate_rsi, compute_heikin_ashi, 
-                compute_trend_indicators, calculate_mtf_rsi
+                compute_trend_indicators
             )
             logger.debug("✅ Import indicators OK")
             
@@ -150,8 +247,14 @@ class RealTimeDataManager:
             logger.debug(f"✅ RSI calculés: {df_copy['RSI_14'].iloc[-1]:.1f}")
             
             logger.debug("Calcul RSI MTF...")
-            df_copy['RSI_mtf'] = calculate_mtf_rsi(df_copy, 14).round(2)
-            logger.debug(f"✅ RSI MTF: {df_copy['RSI_mtf'].iloc[-1]:.1f}")
+            #df_copy['RSI_mtf'] = calculate_mtf_rsi(df_copy, 14).round(2)
+            # 🔧 NOUVEAU: Utilisation de la fonction corrigée
+            # 1. Récupérer les bougies M15
+            logger.debug("Calcul RSI M15 direct...")
+            rsi_m15_value = self._update_rsi_m15(calculate_rsi)
+        
+            # Ajouter RSI M15 au DataFrame 5min
+            df_copy['RSI_mtf'] = rsi_m15_value
             
             # Préparation des indicateurs
             logger.debug("Préparation des indicateurs...")

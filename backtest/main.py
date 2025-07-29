@@ -12,7 +12,7 @@ def main():
     Fonction principale du programme de backtest
     """
     # Configuration du fichier de données
-    file_path = r"C:\Users\Oulmi\OneDrive\Bureau\DEV\trading-strategy\backtest\BTCUSDT_5m_2020_1_1_to_2025_7_21.csv"
+    file_path = r"C:\Users\Oulmi\OneDrive\Bureau\DEV\trading-strategy\backtest\BTCUSDT_1m_2025_7_21_to_2025_7_28.csv"
     
     try:
         print("🚀 Démarrage du backtest...")

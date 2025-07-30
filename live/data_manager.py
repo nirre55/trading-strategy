@@ -13,7 +13,7 @@ from typing import Dict, List, Optional, Callable
 import websocket
 from queue import Queue
 from binance_client import BinanceFuturesClient
-from live.config_live import TRADING_CONFIG
+from config_live import TRADING_CONFIG
 
 logger = logging.getLogger(__name__)
 

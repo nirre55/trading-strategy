@@ -339,6 +339,14 @@ class LiveTradingEngine:
     def _execute_signal(self, signal):
         """Exécute un signal de trading avec SL/TP corrigés et formatés"""
         try:
+            # 🆕 VÉRIFICATION CRITIQUE: Pas de nouveau trade si un trade est déjà actif
+            active_trades_count = len(self.order_manager.active_trades)
+            if active_trades_count > 0:
+                logger.warning(f"❌ Signal {signal.direction} ignoré - {active_trades_count} trade(s) déjà actif(s)")
+                active_trade_ids = list(self.order_manager.active_trades.keys())
+                logger.info(f"   Trades actifs: {active_trade_ids}")
+                return
+            
             # Validation du risque
             can_trade, reason = self.risk_manager.validate_trade(signal.confidence)
             if not can_trade:
@@ -429,6 +437,8 @@ class LiveTradingEngine:
             
             if trade_id:
                 logger.info(f"✅ Trade créé: {trade_id}")
+                # 🆕 RESET du signal detector après création réussie
+                self.signal_detector.reset_pending_signals()
             else:
                 logger.error("❌ Échec création trade")
             
@@ -516,15 +526,33 @@ class LiveTradingEngine:
             self.monitoring.notify_emergency_stop(reason)
     
     def _get_health_data(self) -> Dict:
-        """Retourne les données de santé pour le monitoring"""
-        return {
+        """Retourne les données de santé avec détection des trades multiples"""
+        active_trades_count = len(self.order_manager.active_trades) if self.order_manager else 0
+        
+        health_data = {
             **self.system_health,
             'engine_running': self.running,
             'emergency_stop': self.emergency_stop,
+            'active_trades_count': active_trades_count,
             'last_signal': self.last_signal.timestamp if self.last_signal else None,
             **self.performance_tracker.get_daily_stats(),
             **self.performance_tracker.get_system_stats()
         }
+        
+        # 🚨 ALERTE si plusieurs trades actifs
+        if active_trades_count > 1:
+            logger.critical(f"🚨 PROBLÈME DÉTECTÉ: {active_trades_count} trades actifs simultanément !")
+            active_trade_ids = list(self.order_manager.active_trades.keys())
+            logger.critical(f"🚨 Trades actifs: {active_trade_ids}")
+            
+            # Notification d'urgence
+            if self.monitoring:
+                self.monitoring.send_notification(
+                    f"🚨 ALERTE: {active_trades_count} trades actifs simultanément !",
+                    "CRITICAL"
+                )
+        
+        return health_data
     
     def _signal_handler(self, signum, frame):
         """Gestionnaire de signaux pour arrêt propre"""

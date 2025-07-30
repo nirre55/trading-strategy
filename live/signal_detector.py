@@ -278,6 +278,20 @@ class LiveSignalDetector:
         self.rsi_signal_timestamp_short = None
         logger.info("🔄 Signaux pending réinitialisés")
 
+    def _trigger_signal(self, signal: Signal):
+        """Déclenche les callbacks pour un nouveau signal ET reset automatique"""
+        self.signals_history.append(signal)
+        
+        for callback in self.on_signal_callbacks:
+            try:
+                callback(signal)
+            except Exception as e:
+                logger.error(f"❌ Erreur callback signal: {e}")
+        
+        # 🆕 AUTO-RESET après déclenchement pour éviter les signaux en double
+        logger.info(f"🔄 Auto-reset après signal {signal.direction}")
+        self.reset_pending_signals()
+        
 # Fonction utilitaire pour formater un signal
 def format_signal_message(signal: Signal) -> str:
     """Formate un signal pour affichage/notification"""

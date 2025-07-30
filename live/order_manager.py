@@ -117,6 +117,21 @@ class LiveOrderManager:
         """Ajoute un callback appelé quand un ordre est exécuté"""
         self.on_order_filled_callbacks.append(callback)
     
+    def can_create_new_trade(self) -> Tuple[bool, str]:
+        """
+        Vérifie si un nouveau trade peut être créé
+        
+        Returns:
+            (bool, str): (autorisé, raison)
+        """
+        active_count = len(self.active_trades)
+        
+        if active_count >= 1:  # Limite à 1 trade simultané
+            active_ids = list(self.active_trades.keys())
+            return False, f"Trade déjà actif: {active_ids[0]}"
+        
+        return True, "Nouveau trade autorisé"
+
     def create_trade(self, symbol: str, direction: str, position_size: PositionSize) -> Optional[str]:
         """
         Crée et exécute un nouveau trade
@@ -125,6 +140,12 @@ class LiveOrderManager:
             trade_id si succès, None si échec
         """
         try:
+            # 🆕 VÉRIFICATION CRITIQUE avant création
+            can_create, reason = self.can_create_new_trade()
+            if not can_create:
+                logger.warning(f"❌ Création trade refusée: {reason}")
+                return None
+            
             # Génération de l'ID du trade
             self.trade_counter += 1
             trade_id = f"{symbol}_{direction}_{self.trade_counter}_{int(time.time())}"

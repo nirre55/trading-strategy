@@ -40,10 +40,10 @@ API_CONFIG = {
 TRADING_CONFIG = {
     # Paire de trading
     "symbol": "BTCUSDC",
-    "timeframe": "5m",
+    "timeframe": "1m",
     
     # Capital et gestion du risque
-    "max_balance_risk": 0.02,  # 2% du solde max par trade
+    "max_balance_risk": 0.2,  # 2% du solde max par trade
     "min_position_size": 10,   # Position minimum en USDT
     "max_position_size": 1000,  # Position maximum en USDT
     
@@ -52,14 +52,14 @@ TRADING_CONFIG = {
     "rsi_oversold": 30,
     "rsi_overbought": 70,
     "rsi_mtf_period": 14,
-    "rsi_mtf_tf": "15m",
+    "rsi_mtf_tf": "5m",
     
     # EMA trend
     "ema_period": 200,
     "ema_slope_lookback": 5,
     
     # SL/TP
-    "sl_buffer_pct": 0.001,
+    "sl_buffer_pct": 0.002,
     "tp_ratio": 0.5,
     
     # Frais et slippage
@@ -71,7 +71,7 @@ TRADING_CONFIG = {
 FILTERS_CONFIG = {
     "filter_ha": True,
     "filter_trend": False,
-    "filter_mtf_rsi": True
+    "filter_mtf_rsi": False
 }
 
 # Configuration de surveillance
@@ -121,6 +121,13 @@ LOGGING_CONFIG = {
     "log_filename": f"live_bot_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log",
     "log_rotation": "midnight",
     "log_retention": 30,  # jours
+}
+
+TRADING_BEHAVIOR = {
+    "max_concurrent_trades": 1,        # 🔥 LIMITE STRICTE à 1 trade
+    "auto_reset_signals": True,        # Reset auto des signaux après exécution
+    "prevent_double_signals": True,    # Empêche les signaux doubles
+    "signal_cooldown_minutes": 2       # Cooldown entre signaux
 }
 
 # Validation de la configuration

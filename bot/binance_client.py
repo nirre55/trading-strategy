@@ -16,7 +16,7 @@ class BinanceClient:
         params = {
             'symbol': symbol,
             'interval': interval,
-            'limit': limit
+            'limit': limit + 1  # +1 pour avoir la bougie en cours
         }
         
         try:
@@ -38,6 +38,10 @@ class BinanceClient:
             # Convertir les timestamps
             df['open_time'] = pd.to_datetime(df['open_time'], unit='ms')
             df['close_time'] = pd.to_datetime(df['close_time'], unit='ms')
+            
+            # Supprimer la dernière bougie (en cours) pour éviter les doublons
+            # et garantir que nous avons seulement des bougies fermées
+            df = df[:-1].copy()
             
             return df
             

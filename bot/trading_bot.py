@@ -145,20 +145,132 @@ class HeikinAshiRSIBot:
             last_ha['HA_close']
         )
         
-        # Affichage coloré
-        self.display_results(last_ha, last_rsi, candle_color, signals_analysis)
+        # Décider si on doit afficher selon la configuration
+        should_display = self.should_display_results(signals_analysis)
+        
+        if should_display == "minimal":
+            # Affichage minimal : seulement couleur HA + RSI
+            self.display_minimal_info(last_ha, last_rsi, candle_color, signals_analysis)
+        elif should_display:
+            # Affichage complet
+            self.display_results(last_ha, last_rsi, candle_color, signals_analysis)
+        elif signals_analysis['pending']['long'] or signals_analysis['pending']['short']:
+            # Affichage minimal si signal en attente
+            if config.SIGNAL_SETTINGS['SHOW_MINIMAL_INFO']:
+                self.display_minimal_info(last_ha, last_rsi, candle_color, signals_analysis)
+            else:
+                timestamp = datetime.now().strftime("%H:%M:%S")
+                pending_status = self.trading_signals.get_pending_status()
+                print(f"[{timestamp}] {config.SYMBOL} - {pending_status}")
+        elif config.LOG_SETTINGS['SHOW_SIGNAL_ANALYSIS']:
+            # Affichage minimal pour debug
+            timestamp = datetime.now().strftime("%H:%M:%S")
+            print(f"[{timestamp}] {config.SYMBOL} - Aucun signal | LONG: {signals_analysis['count']['LONG']} | SHORT: {signals_analysis['count']['SHORT']}")
+    
+    def display_minimal_info(self, ha_data, rsi_data, candle_color, signals_analysis):
+        """Affichage minimal : couleur HA + RSI seulement"""
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        
+        # Couleur pour la bougie HA
+        if candle_color == 'green':
+            ha_color = config.COLORS['green']
+            ha_symbol = "🟢"
+        elif candle_color == 'red':
+            ha_color = config.COLORS['red']
+            ha_symbol = "🔴"
+        else:  # doji
+            ha_color = config.COLORS['yellow']
+            ha_symbol = "🟡"
+        
+        # Construire la ligne des RSI
+        rsi_info = []
+        for rsi_name, rsi_value in rsi_data.items():
+            if not np.isnan(rsi_value):
+                # Couleur selon les seuils configurés
+                oversold_threshold = config.SIGNAL_SETTINGS['RSI_OVERSOLD_THRESHOLD']
+                overbought_threshold = config.SIGNAL_SETTINGS['RSI_OVERBOUGHT_THRESHOLD']
+                
+                if rsi_value <= oversold_threshold:
+                    rsi_color = config.COLORS['green']
+                elif rsi_value >= overbought_threshold:
+                    rsi_color = config.COLORS['red']
+                else:
+                    rsi_color = config.COLORS['white']
+                
+                # Arrondi intelligent
+                rounded_rsi = round(rsi_value, 1)
+                if rounded_rsi == int(rounded_rsi):
+                    rsi_str = f"{int(rounded_rsi)}.0"
+                else:
+                    rsi_str = f"{rounded_rsi}"
+                
+                # Extraire seulement le numéro de la période (5, 14, 21)
+                period = rsi_name.split('_')[1]
+                rsi_info.append(f"{rsi_color}{period}:{rsi_str}{config.COLORS['reset']}")
+            else:
+                period = rsi_name.split('_')[1]
+                rsi_info.append(f"{config.COLORS['white']}{period}:N/A{config.COLORS['reset']}")
+        
+        # Indication de signal si présent ou en attente
+        signal_indicator = ""
+        if signals_analysis['valid']:
+            if signals_analysis['type'] == 'LONG':
+                signal_indicator = f" {config.COLORS['green']}{config.COLORS['bold']}📈 LONG{config.COLORS['reset']}"
+            else:  # SHORT
+                signal_indicator = f" {config.COLORS['red']}{config.COLORS['bold']}📉 SHORT{config.COLORS['reset']}"
+        elif signals_analysis['pending']['long']:
+            signal_indicator = f" {config.COLORS['yellow']}🔄 LONG EN ATTENTE{config.COLORS['reset']}"
+        elif signals_analysis['pending']['short']:
+            signal_indicator = f" {config.COLORS['yellow']}🔄 SHORT EN ATTENTE{config.COLORS['reset']}"
+        
+        # Affichage compact sur une ligne
+        rsi_line = " | ".join(rsi_info)
+        print(f"[{timestamp}] {ha_symbol} {ha_color}{candle_color.upper()}{config.COLORS['reset']} | RSI: {rsi_line}{signal_indicator}")
+    
+    def should_display_results(self, signals_analysis):
+        """Détermine si on doit afficher les résultats selon la configuration"""
+        signal_valid = signals_analysis['valid']
+        signal_type = signals_analysis['type']
+        
+        # Mode minimal : affichage simple à chaque bougie
+        if config.SIGNAL_SETTINGS['SHOW_MINIMAL_INFO']:
+            return "minimal"
+        
+        # Si on affiche toutes les bougies, toujours afficher
+        if config.SIGNAL_SETTINGS['SHOW_ALL_CANDLES']:
+            return True
+        
+        # Si on affiche seulement les signaux valides
+        if config.SIGNAL_SETTINGS['SHOW_ONLY_VALID_SIGNALS']:
+            return signal_valid  # Affiche seulement si signal LONG ou SHORT
+        
+        # Si on affiche l'analyse neutre
+        if config.SIGNAL_SETTINGS['SHOW_NEUTRAL_ANALYSIS']:
+            return True
+        
+        # Par défaut, afficher seulement les signaux valides
+        return signal_valid
     
     def display_results(self, ha_data, rsi_data, candle_color, signals_analysis):
         """Affiche les résultats dans la console avec couleurs"""
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        signal_type = signals_analysis['type']
         
         # Couleur pour la bougie
         color_code = config.COLORS['green'] if candle_color == 'green' else config.COLORS['red']
         if candle_color == 'doji':
             color_code = config.COLORS['yellow']
         
+        # Titre avec emphasis sur le signal détecté
+        signal_emoji = self.trading_signals.get_signal_emoji(signal_type)
+        if signals_analysis['valid']:
+            signal_color = config.COLORS['green'] if signal_type == 'LONG' else config.COLORS['red']
+            title_signal = f" - {signal_color}{config.COLORS['bold']}🚨 {signal_type} SIGNAL 🚨{config.COLORS['reset']}"
+        else:
+            title_signal = ""
+        
         print(f"\n{config.COLORS['cyan']}{config.DISPLAY_SYMBOLS['SEPARATOR']}{config.COLORS['reset']}")
-        print(f"{config.COLORS['bold']}[{timestamp}] {config.SYMBOL} - {config.TIMEFRAME}{config.COLORS['reset']}")
+        print(f"{config.COLORS['bold']}[{timestamp}] {config.SYMBOL} - {config.TIMEFRAME}{title_signal}{config.COLORS['reset']}")
         print(f"{config.COLORS['cyan']}{config.DISPLAY_SYMBOLS['SEPARATOR']}{config.COLORS['reset']}")
         
         # Afficher les données Heikin Ashi
@@ -173,20 +285,38 @@ class HeikinAshiRSIBot:
         print(f"\n{config.COLORS['white']}RSI sur Heikin Ashi:{config.COLORS['reset']}")
         for rsi_name, rsi_value in rsi_data.items():
             if not np.isnan(rsi_value):
-                # Couleur selon la valeur du RSI
-                if rsi_value >= 70:
-                    rsi_color = config.COLORS['red']  # Surachat
-                elif rsi_value <= 30:
+                # Couleur selon la valeur du RSI et les seuils de signal
+                oversold_threshold = config.SIGNAL_SETTINGS['RSI_OVERSOLD_THRESHOLD']
+                overbought_threshold = config.SIGNAL_SETTINGS['RSI_OVERBOUGHT_THRESHOLD']
+                
+                if rsi_value <= oversold_threshold:
                     rsi_color = config.COLORS['green']  # Survente
+                    rsi_status = " (SURVENTE)" if signals_analysis['valid'] and signal_type == 'LONG' else ""
+                elif rsi_value >= overbought_threshold:
+                    rsi_color = config.COLORS['red']  # Surachat
+                    rsi_status = " (SURACHAT)" if signals_analysis['valid'] and signal_type == 'SHORT' else ""
                 else:
                     rsi_color = config.COLORS['white']  # Neutre
+                    rsi_status = ""
                 
-                print(f"  {rsi_name}: {rsi_color}{rsi_value}{config.COLORS['reset']}")
+                # Arrondi intelligent : 1 décimale, supprime .0 si entier
+                rounded_rsi = round(rsi_value, 1)
+                if rounded_rsi == int(rounded_rsi):
+                    rsi_str = f"{int(rounded_rsi)}.0"
+                else:
+                    rsi_str = f"{rounded_rsi}"
+                
+                print(f"  {rsi_name}: {rsi_color}{config.COLORS['bold']}{rsi_str}{rsi_status}{config.COLORS['reset']}")
             else:
                 print(f"  {rsi_name}: N/A (pas assez de données)")
         
-        # Afficher les signaux de trading
+        # Afficher les signaux de trading avec état d'attente
         self.display_trading_signals(signals_analysis)
+        
+        # Afficher l'état d'attente si applicable
+        pending_status = self.trading_signals.get_pending_status()
+        if pending_status and not signals_analysis['valid']:
+            print(f"\n{config.COLORS['yellow']}{config.COLORS['bold']}{pending_status}{config.COLORS['reset']}")
         
         # Affichage de debug - nombre de bougies utilisées
         if config.SHOW_DEBUG:

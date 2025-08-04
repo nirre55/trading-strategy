@@ -20,12 +20,17 @@ SHOW_DEBUG = False
 
 # Configuration des signaux de trading
 SIGNAL_SETTINGS = {
-    # Seuils RSI pour les signaux
+    # Configuration des signaux
     'RSI_OVERSOLD_THRESHOLD': 30,    # Seuil de survente pour signal LONG
     'RSI_OVERBOUGHT_THRESHOLD': 70,  # Seuil de surachat pour signal SHORT
     
     # Périodes RSI requises pour les signaux (doit correspondre à RSI_PERIODS)
     'REQUIRED_RSI_PERIODS': [5, 14, 21],
+    
+    # Mode de déclenchement des signaux
+    'SIGNAL_MODE': 'DELAYED',  # 'IMMEDIATE' ou 'DELAYED'
+    # IMMEDIATE: Toutes les conditions doivent être réunies en même temps
+    # DELAYED: RSI d'abord, puis attendre le changement de couleur HA
     
     # Conditions des signaux
     'LONG_CONDITIONS': {
@@ -44,6 +49,10 @@ SIGNAL_SETTINGS = {
     'SHOW_SIGNAL_DETAILS': True,           # Afficher les détails des conditions
     'SHOW_SIGNAL_COUNTERS': True,          # Afficher les compteurs de signaux
     'SHOW_REJECTION_REASONS': True,        # Afficher pourquoi un signal est rejeté
+    'SHOW_ONLY_VALID_SIGNALS': True,       # Afficher SEULEMENT les signaux valides
+    'SHOW_ALL_CANDLES': False,             # Afficher toutes les bougies (même sans signal)
+    'SHOW_NEUTRAL_ANALYSIS': False,        # Afficher l'analyse même quand pas de signal
+    'SHOW_MINIMAL_INFO': True,            # Afficher seulement couleur HA + RSI à chaque bougie
     
     # Alertes sonores (pour extension future)
     'SOUND_ALERTS': False,                  # Alertes sonores pour les signaux

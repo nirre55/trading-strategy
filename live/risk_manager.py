@@ -73,9 +73,9 @@ class LiveRiskManager:
         self._check_emergency_limits()
     
     def calculate_position_size(self, entry_price: float, stop_loss: float, 
-                              direction: str) -> Optional[PositionSize]:
+                          direction: str) -> Optional[PositionSize]:
         """
-        Calcule la taille de position optimale
+        Calcule la taille de position optimale avec TP fixe ou ratio
         
         Args:
             entry_price: Prix d'entrée prévu
@@ -125,12 +125,8 @@ class LiveRiskManager:
                 max_quantity = usdt_value / entry_price
                 max_risk_usdt = max_quantity * risk_per_unit
             
-            # Calcul du take profit
-            tp_distance = price_distance * self.config['tp_ratio']
-            if direction == 'LONG':
-                take_profit = entry_price + tp_distance
-            else:  # SHORT
-                take_profit = entry_price - tp_distance
+            # 🆕 CALCUL DU TAKE PROFIT SELON LE MODE
+            take_profit = self._calculate_take_profit(entry_price, stop_loss, direction)
             
             # Formatage selon les règles Binance
             quantity = self._format_quantity(max_quantity)
@@ -145,9 +141,19 @@ class LiveRiskManager:
                 take_profit=round(take_profit, 1)
             )
             
+            # 🔍 LOGS DÉTAILLÉS SELON LE MODE
+            tp_mode = self.config.get('tp_mode', 'ratio')
             logger.info(f"📊 Position calculée: {quantity} @ {entry_price:.1f} USDT")
             logger.info(f"   💰 Valeur: {position.usdt_value} USDT")
             logger.info(f"   ⚠️ Risque: {position.risk_amount} USDT ({position.risk_percentage:.1f}%)")
+            logger.info(f"   🎯 Mode TP: {tp_mode}")
+            
+            if tp_mode == "fixed_percent":
+                tp_percent = self.config.get('tp_fixed_percent', 1.0)
+                logger.info(f"   📈 TP Fixe: {tp_percent}% du prix d'entrée")
+            else:
+                tp_ratio = self.config.get('tp_ratio', 1.0)
+                logger.info(f"   📈 TP Ratio: {tp_ratio}x le risque SL")
             
             return position
             
@@ -155,6 +161,71 @@ class LiveRiskManager:
             logger.error(f"❌ Erreur calcul position: {e}")
             return None
     
+    def _calculate_take_profit(self, entry_price: float, stop_loss: float, direction: str) -> float:
+        """
+        🆕 NOUVEAU: Calcule le Take Profit selon le mode configuré
+        
+        Args:
+            entry_price: Prix d'entrée
+            stop_loss: Prix de stop loss
+            direction: 'LONG' ou 'SHORT'
+        
+        Returns:
+            float: Prix de Take Profit
+        """
+        try:
+            tp_mode = self.config.get('tp_mode', 'ratio')
+            
+            if tp_mode == "fixed_percent":
+                # 🎯 MODE NOUVEAU: Pourcentage fixe du prix d'entrée
+                tp_percent = self.config.get('tp_fixed_percent', 1.0)  # 1% par défaut
+                
+                if direction == 'LONG':
+                    # LONG: TP au-dessus du prix d'entrée
+                    take_profit = entry_price * (1 + tp_percent / 100)
+                    logger.debug(f"🔍 TP LONG fixe: {entry_price:.1f} + {tp_percent}% = {take_profit:.1f}")
+                else:  # SHORT
+                    # SHORT: TP en-dessous du prix d'entrée
+                    take_profit = entry_price * (1 - tp_percent / 100)
+                    logger.debug(f"🔍 TP SHORT fixe: {entry_price:.1f} - {tp_percent}% = {take_profit:.1f}")
+                
+                # Calcul du ratio R/R pour information
+                if direction == 'LONG':
+                    sl_distance = entry_price - stop_loss
+                    tp_distance = take_profit - entry_price
+                else:  # SHORT
+                    sl_distance = stop_loss - entry_price
+                    tp_distance = entry_price - take_profit
+                
+                rr_ratio = tp_distance / sl_distance if sl_distance > 0 else 0
+                logger.info(f"📊 TP Fixe {tp_percent}% → Ratio R/R: {rr_ratio:.2f}")
+                
+            else:
+                # 📊 MODE ANCIEN: Ratio du risque SL (comportement original)
+                tp_ratio = self.config.get('tp_ratio', 1.0)
+                
+                if direction == 'LONG':
+                    tp_distance = (entry_price - stop_loss) * tp_ratio
+                    take_profit = entry_price + tp_distance
+                    logger.debug(f"🔍 TP LONG ratio: {entry_price:.1f} + {tp_distance:.1f} = {take_profit:.1f}")
+                else:  # SHORT
+                    tp_distance = (stop_loss - entry_price) * tp_ratio
+                    take_profit = entry_price - tp_distance
+                    logger.debug(f"🔍 TP SHORT ratio: {entry_price:.1f} - {tp_distance:.1f} = {take_profit:.1f}")
+                
+                logger.info(f"📊 TP Ratio {tp_ratio}x du risque SL")
+            
+            return take_profit
+            
+        except Exception as e:
+            logger.error(f"❌ Erreur calcul TP: {e}")
+            # Fallback vers le mode ratio
+            tp_distance = abs(entry_price - stop_loss) * self.config.get('tp_ratio', 1.0)
+            if direction == 'LONG':
+                return entry_price + tp_distance
+            else:
+                return entry_price - tp_distance
+            
     def validate_trade(self, signal_confidence: float) -> Tuple[bool, str]:
         """
         Valide si un trade peut être exécuté
@@ -175,9 +246,9 @@ class LiveRiskManager:
             return False, f"Confiance trop faible: {signal_confidence:.1%}"
         
         # Vérification du timing (éviter les heures creuses)
-        current_hour = datetime.now().hour
-        if current_hour in [22, 23, 0, 1, 2, 3, 4, 5]:  # Heures creuses
-            return False, "Heures de trading restreintes"
+        # current_hour = datetime.now().hour
+        # if current_hour in [22, 23, 0, 1, 2, 3, 4, 5]:  # Heures creuses
+        #     return False, "Heures de trading restreintes"
         
         return True, "Trade autorisé"
     

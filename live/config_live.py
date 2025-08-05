@@ -40,10 +40,10 @@ API_CONFIG = {
 TRADING_CONFIG = {
     # Paire de trading
     "symbol": "BTCUSDC",
-    "timeframe": "1m",
+    "timeframe": "5m",
     
     # Capital et gestion du risque
-    "max_balance_risk": 0.2,  # 2% du solde max par trade
+    "max_balance_risk": 0.2,  # 20% du solde max par trade
     "min_position_size": 10,   # Position minimum en USDT
     "max_position_size": 1000,  # Position maximum en USDT
     
@@ -59,9 +59,15 @@ TRADING_CONFIG = {
     "ema_slope_lookback": 5,
     
     # SL/TP
-    "sl_buffer_pct": 0.002,
+    "sl_buffer_pct": 0.001,  # 0.1% buffer pour SL
     "tp_ratio": 0.5,
     
+    # 🆕 CHOIX DU MODE TP
+    "tp_mode": "fixed_percent",  # Options: "ratio" (ancien) ou "fixed_percent" (nouveau)
+
+    # 🆕 Mode nouveau (pourcentage fixe du prix d'entrée)
+    "tp_fixed_percent": 0.15,  # 0.15% du prix d'entrée si tp_mode = "fixed_percent"
+
     # Frais et slippage
     "trading_fees": 0.0004,  # 0.04% (maker/taker Binance Futures)
     "slippage": 0.0002,      # 0.02% slippage estimé

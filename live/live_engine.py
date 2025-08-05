@@ -337,7 +337,7 @@ class LiveTradingEngine:
         logger.info(f"📊 RSI {direction} détecté - En attente de confirmation")
     
     def _execute_signal(self, signal):
-        """Exécute un signal de trading avec SL/TP corrigés et formatés"""
+        """Exécute un signal de trading avec TP fixe ou ratio selon la config"""
         try:
             # 🆕 VÉRIFICATION CRITIQUE: Pas de nouveau trade si un trade est déjà actif
             active_trades_count = len(self.order_manager.active_trades)
@@ -353,61 +353,81 @@ class LiveTradingEngine:
                 logger.warning(f"❌ Trade refusé: {reason}")
                 return
             
-            # 🔍 DIAGNOSTIC COMPLET SL - LONG ET SHORT
+            # 💰 DIAGNOSTIC DU PRIX D'ENTRÉE
             current_price = signal.indicators.get('close', 0)
+            logger.info(f"💰 Prix d'entrée: {current_price:.1f} USDT")
             
-            logger.info(f"🔍 === DIAGNOSTIC SL {signal.direction} ===")
-            logger.info(f"🔍 signal.indicators keys: {list(signal.indicators.keys())}")
-            logger.info(f"🔍 current_price (close): {current_price}")
-            logger.info(f"🔍 HA_high raw: {signal.indicators.get('HA_high')}")
-            logger.info(f"🔍 HA_low raw: {signal.indicators.get('HA_low')}")
-            logger.info(f"🔍 high raw: {signal.indicators.get('high')}")
-            logger.info(f"🔍 low raw: {signal.indicators.get('low')}")
-            
-            # 🔧 CALCUL SL CORRIGÉ avec buffer ET formatage
+            # 🔍 CALCUL SL (inchangé)
             if signal.direction == "LONG":
-                # DIAGNOSTIC LONG
-                ha_low_value = signal.indicators.get('HA_low')
-                fallback_value = current_price * 0.99
-                
-                logger.info(f"🔍 LONG - HA_low exists: {ha_low_value is not None}")
-                logger.info(f"🔍 LONG - HA_low value: {ha_low_value}")
-                logger.info(f"🔍 LONG - Fallback value: {fallback_value}")
-                
-                # Calcul avec buffer
-                ha_low = signal.indicators.get('HA_low', fallback_value)
+                ha_low = signal.indicators.get('HA_low', current_price * 0.99)
                 stop_loss_raw = ha_low * (1 - TRADING_CONFIG.get('sl_buffer_pct', 0.001))
-                
-                # 🆕 FORMATAGE BINANCE
                 stop_loss = self.binance_client.format_price(stop_loss_raw, TRADING_CONFIG["symbol"])
-                
-                logger.info(f"🔍 LONG - SL avant buffer: {ha_low}")
-                logger.info(f"🔍 LONG - SL avec buffer: {stop_loss_raw}")
-                logger.info(f"🔍 LONG - SL formaté final: {stop_loss}")
-                
+                logger.info(f"🛑 Stop Loss LONG: {stop_loss:.1f} USDT")
             else:  # SHORT
-                # DIAGNOSTIC SHORT
-                ha_high_value = signal.indicators.get('HA_high')
-                fallback_value = current_price * 1.01
-                
-                logger.info(f"🔍 SHORT - HA_high exists: {ha_high_value is not None}")
-                logger.info(f"🔍 SHORT - HA_high value: {ha_high_value}")
-                logger.info(f"🔍 SHORT - Fallback value: {fallback_value}")
-                
-                # Calcul avec buffer
-                ha_high = signal.indicators.get('HA_high', fallback_value)
+                ha_high = signal.indicators.get('HA_high', current_price * 1.01)
                 stop_loss_raw = ha_high * (1 + TRADING_CONFIG.get('sl_buffer_pct', 0.001))
-                
-                # 🆕 FORMATAGE BINANCE
                 stop_loss = self.binance_client.format_price(stop_loss_raw, TRADING_CONFIG["symbol"])
+                logger.info(f"🛑 Stop Loss SHORT: {stop_loss:.1f} USDT")
+            
+            # 🎯 CALCUL TP SELON LE MODE CONFIGURÉ
+            tp_mode = TRADING_CONFIG.get('tp_mode', 'ratio')
+            logger.info(f"🎯 Mode TP: {tp_mode}")
+            
+            if tp_mode == "fixed_percent":
+                # 🆕 MODE NOUVEAU: Pourcentage fixe du prix d'entrée
+                tp_percent = TRADING_CONFIG.get('tp_fixed_percent', 1.0)
                 
-                logger.info(f"🔍 SHORT - SL avant buffer: {ha_high}")
-                logger.info(f"🔍 SHORT - SL avec buffer: {stop_loss_raw}")
-                logger.info(f"🔍 SHORT - SL formaté final: {stop_loss}")
+                if signal.direction == "LONG":
+                    take_profit_raw = current_price * (1 + tp_percent / 100)
+                else:  # SHORT
+                    take_profit_raw = current_price * (1 - tp_percent / 100)
+                
+                take_profit = self.binance_client.format_price(take_profit_raw, TRADING_CONFIG["symbol"])
+                
+                logger.info(f"🎯 Take Profit {tp_percent}% fixe: {take_profit:.1f} USDT")
+                
+                # Calcul du ratio R/R pour information
+                if signal.direction == "LONG":
+                    sl_distance = current_price - stop_loss
+                    tp_distance = take_profit - current_price
+                else:  # SHORT
+                    sl_distance = stop_loss - current_price
+                    tp_distance = current_price - take_profit
+                
+                rr_ratio = tp_distance / sl_distance if sl_distance > 0 else 0
+                logger.info(f"📊 Ratio R/R résultant: {rr_ratio:.2f}")
+                
+            else:
+                # 📊 MODE ANCIEN: Ratio du risque SL (comportement original)
+                tp_ratio = TRADING_CONFIG.get('tp_ratio', 1.0)
+                
+                if signal.direction == "LONG":
+                    tp_distance = (current_price - stop_loss) * tp_ratio
+                    take_profit_raw = current_price + tp_distance
+                else:  # SHORT
+                    tp_distance = (stop_loss - current_price) * tp_ratio
+                    take_profit_raw = current_price - tp_distance
+                
+                take_profit = self.binance_client.format_price(take_profit_raw, TRADING_CONFIG["symbol"])
+                logger.info(f"🎯 Take Profit ratio {tp_ratio}x: {take_profit:.1f} USDT")
             
-            logger.info(f"🔍 === FIN DIAGNOSTIC SL ===")
+            # Validation de cohérence TP/SL
+            if signal.direction == "LONG":
+                if take_profit <= current_price:
+                    logger.error(f"❌ TP LONG invalide: {take_profit} <= {current_price}")
+                    return
+                if stop_loss >= current_price:
+                    logger.error(f"❌ SL LONG invalide: {stop_loss} >= {current_price}")
+                    return
+            else:  # SHORT
+                if take_profit >= current_price:
+                    logger.error(f"❌ TP SHORT invalide: {take_profit} >= {current_price}")
+                    return
+                if stop_loss <= current_price:
+                    logger.error(f"❌ SL SHORT invalide: {stop_loss} <= {current_price}")
+                    return
             
-            # Calcul de la taille de position avec SL corrigé
+            # Calcul de la taille de position avec les nouveaux niveaux
             position_size = self.risk_manager.calculate_position_size(
                 entry_price=current_price,
                 stop_loss=stop_loss,
@@ -418,15 +438,22 @@ class LiveTradingEngine:
                 logger.warning("❌ Impossible de calculer la taille de position")
                 return
             
-            # 🔍 DIAGNOSTIC POSITION SIZE
-            logger.info(f"🔍 === DIAGNOSTIC POSITION ===")
-            logger.info(f"🔍 Entry price utilisé: {current_price}")
-            logger.info(f"🔍 Stop loss utilisé: {stop_loss}")
-            logger.info(f"🔍 Direction: {signal.direction}")
-            logger.info(f"🔍 Position calculée - SL: {position_size.stop_loss}")
-            logger.info(f"🔍 Position calculée - TP: {position_size.take_profit}")
-            logger.info(f"🔍 Distance SL: {abs(current_price - stop_loss):.1f} USDT")
-            logger.info(f"🔍 === FIN DIAGNOSTIC POSITION ===")
+            # 📊 RÉSUMÉ DU TRADE
+            logger.info(f"📊 === RÉSUMÉ TRADE {signal.direction} ===")
+            logger.info(f"💰 Entry: {current_price:.1f} USDT")
+            logger.info(f"🛑 Stop Loss: {stop_loss:.1f} USDT")
+            logger.info(f"🎯 Take Profit: {take_profit:.1f} USDT")
+            logger.info(f"📏 Quantité: {position_size.quantity}")
+            logger.info(f"💸 Risque: {position_size.risk_amount:.2f} USDT")
+            
+            if tp_mode == "fixed_percent":
+                tp_percent = TRADING_CONFIG.get('tp_fixed_percent', 1.0)
+                logger.info(f"🎯 Mode: TP fixe {tp_percent}%")
+            else:
+                tp_ratio = TRADING_CONFIG.get('tp_ratio', 1.0)
+                logger.info(f"🎯 Mode: TP ratio {tp_ratio}x")
+            
+            logger.info(f"📊 === FIN RÉSUMÉ ===")
             
             # Création du trade
             trade_id = self.order_manager.create_trade(
@@ -437,7 +464,7 @@ class LiveTradingEngine:
             
             if trade_id:
                 logger.info(f"✅ Trade créé: {trade_id}")
-                # 🆕 RESET du signal detector après création réussie
+                # Reset du signal detector après création réussie
                 self.signal_detector.reset_pending_signals()
             else:
                 logger.error("❌ Échec création trade")

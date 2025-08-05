@@ -1,5 +1,5 @@
 """
-Module pour la génération des signaux de trading
+Module pour la génération des signaux de trading - VERSION CORRIGÉE
 """
 import numpy as np
 import config
@@ -10,8 +10,8 @@ class TradingSignals:
         self.signal_count = {'LONG': 0, 'SHORT': 0}
         
         # État des signaux en attente
-        self.pending_long = False   # RSI en survente, attente bougie verte
-        self.pending_short = False  # RSI en surachat, attente bougie rouge
+        self.pending_long = False   # RSI ont été en survente, attente bougie verte
+        self.pending_short = False  # RSI ont été en surachat, attente bougie rouge
         self.pending_since_candle = None  # Depuis quelle bougie on attend
         
         # Charger les paramètres depuis config
@@ -43,7 +43,7 @@ class TradingSignals:
     def check_long_signal(self, rsi_values, ha_open, ha_close):
         """
         Vérifie les conditions pour un signal LONG
-        Mode DELAYED: RSI d'abord, puis couleur HA
+        Mode DELAYED: Une fois RSI en survente détecté, on attend seulement la couleur HA
         """
         all_oversold, all_overbought, rsi_status = self.check_rsi_conditions(rsi_values)
         
@@ -60,27 +60,28 @@ class TradingSignals:
             else:
                 reason = self._get_rejection_reason(all_oversold, ha_green, "LONG")
         else:
-            # Mode DELAYED : RSI d'abord, puis attendre couleur HA
+            # Mode DELAYED : RSI d'abord, puis attendre couleur HA (SANS annulation)
             if all_oversold and not self.pending_long:
                 # Nouveau état d'attente LONG
                 self.pending_long = True
-                self.pending_short = False  # Annuler attente SHORT
+                self.pending_short = False  # Annuler attente SHORT si active
                 reason = "🔄 ATTENTE LONG: RSI < 30 détecté, attente bougie HA verte"
                 return False, reason
             elif self.pending_long and ha_green:
-                # Signal LONG déclenché !
+                # Signal LONG déclenché ! (peu importe l'état actuel des RSI)
                 signal_valid = True
                 self.pending_long = False
-                reason = "✅ SIGNAL LONG: RSI < 30 + HA Verte (DELAYED)"
+                reason = "✅ SIGNAL LONG: Attente satisfaite avec HA Verte (DELAYED)"
                 return signal_valid, reason
-            elif self.pending_long and not all_oversold:
-                # RSI sortent de la zone, annuler l'attente
-                self.pending_long = False
-                reason = "❌ ATTENTE LONG ANNULÉE: RSI sortis de survente"
-                return False, reason
             elif self.pending_long and not ha_green:
-                # Toujours en attente
-                reason = f"🔄 ATTENTE LONG: RSI < 30 confirmé, attente bougie HA verte"
+                # Toujours en attente (on ne vérifie PLUS les RSI)
+                reason = f"🔄 ATTENTE LONG: En attente bougie HA verte"
+                return False, reason
+            elif all_oversold and not self.pending_long:
+                # RSI en survente mais pas encore en attente (cas edge)
+                self.pending_long = True
+                self.pending_short = False
+                reason = "🔄 ATTENTE LONG: RSI < 30 détecté, attente bougie HA verte"
                 return False, reason
             else:
                 # Pas de conditions
@@ -92,7 +93,7 @@ class TradingSignals:
     def check_short_signal(self, rsi_values, ha_open, ha_close):
         """
         Vérifie les conditions pour un signal SHORT
-        Mode DELAYED: RSI d'abord, puis couleur HA
+        Mode DELAYED: Une fois RSI en surachat détecté, on attend seulement la couleur HA
         """
         all_oversold, all_overbought, rsi_status = self.check_rsi_conditions(rsi_values)
         
@@ -109,27 +110,28 @@ class TradingSignals:
             else:
                 reason = self._get_rejection_reason(all_overbought, ha_red, "SHORT")
         else:
-            # Mode DELAYED : RSI d'abord, puis attendre couleur HA
+            # Mode DELAYED : RSI d'abord, puis attendre couleur HA (SANS annulation)
             if all_overbought and not self.pending_short:
                 # Nouveau état d'attente SHORT
                 self.pending_short = True
-                self.pending_long = False  # Annuler attente LONG
+                self.pending_long = False  # Annuler attente LONG si active
                 reason = "🔄 ATTENTE SHORT: RSI > 70 détecté, attente bougie HA rouge"
                 return False, reason
             elif self.pending_short and ha_red:
-                # Signal SHORT déclenché !
+                # Signal SHORT déclenché ! (peu importe l'état actuel des RSI)
                 signal_valid = True
                 self.pending_short = False
-                reason = "✅ SIGNAL SHORT: RSI > 70 + HA Rouge (DELAYED)"
+                reason = "✅ SIGNAL SHORT: Attente satisfaite avec HA Rouge (DELAYED)"
                 return signal_valid, reason
-            elif self.pending_short and not all_overbought:
-                # RSI sortent de la zone, annuler l'attente
-                self.pending_short = False
-                reason = "❌ ATTENTE SHORT ANNULÉE: RSI sortis de surachat"
-                return False, reason
             elif self.pending_short and not ha_red:
-                # Toujours en attente
-                reason = f"🔄 ATTENTE SHORT: RSI > 70 confirmé, attente bougie HA rouge"
+                # Toujours en attente (on ne vérifie PLUS les RSI)
+                reason = f"🔄 ATTENTE SHORT: En attente bougie HA rouge"
+                return False, reason
+            elif all_overbought and not self.pending_short:
+                # RSI en surachat mais pas encore en attente (cas edge)
+                self.pending_short = True
+                self.pending_long = False
+                reason = "🔄 ATTENTE SHORT: RSI > 70 détecté, attente bougie HA rouge"
                 return False, reason
             else:
                 # Pas de conditions
@@ -160,7 +162,7 @@ class TradingSignals:
     
     def analyze_signals(self, rsi_values, ha_open, ha_close):
         """
-        Analyse complète des signaux avec mode DELAYED
+        Analyse complète des signaux avec mode DELAYED corrigé
         """
         # Vérifier signal LONG
         long_valid, long_reason = self.check_long_signal(rsi_values, ha_open, ha_close)
@@ -223,5 +225,10 @@ class TradingSignals:
         """Remet à zéro les compteurs de signaux"""
         self.signal_count = {'LONG': 0, 'SHORT': 0}
         self.last_signal = None
+        self.pending_long = False
+        self.pending_short = False
+    
+    def force_reset_pending(self):
+        """Force la remise à zéro des états d'attente"""
         self.pending_long = False
         self.pending_short = False

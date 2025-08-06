@@ -3,7 +3,7 @@ Configuration du bot de trading Binance Futures
 """
 
 # Configuration du symbole et timeframe
-SYMBOL = "BTCUSDT"
+SYMBOL = "BTCUSDC"
 TIMEFRAME = "1m"  # 1m, 3m, 5m, 15m, 30m, 1h, 2h, 4h, 6h, 8h, 12h, 1d, 3d, 1w, 1M
 
 # Configuration des périodes RSI
@@ -73,6 +73,60 @@ SIGNAL_SETTINGS = {
     'SOUND_ALERTS': False,                  # Alertes sonores pour les signaux
     'ALERT_LONG_SOUND': 'beep_long.wav',   # Fichier son pour signal LONG
     'ALERT_SHORT_SOUND': 'beep_short.wav', # Fichier son pour signal SHORT
+}
+
+# Configuration Asset & Symbol
+ASSET_CONFIG = {
+    'BALANCE_ASSET': 'USDC',                # Asset pour balance (USDT/USDC/BUSD)
+    'SYMBOL': 'BTCUSDC',                    # Symbole trading
+}
+
+# Configuration Trading avancée
+TRADING_CONFIG = {
+    'ENABLED': False,                       # Trading automatique (désactivé par défaut)
+    'RISK_PERCENT': 10.0,                   # % du capital par trade
+    
+    # Configuration Take Profit (fixe depuis entrée)
+    'TAKE_PROFIT_PERCENT': 1.5,            # TP à 1.5% depuis prix entrée
+    
+    # Configuration Stop Loss (basé sur bougies)
+    'STOP_LOSS_LOOKBACK_CANDLES': 5,       # Regarder 5 dernières bougies
+    'STOP_LOSS_OFFSET_PERCENT': 0.1,       # Offset 0.1% depuis low/high trouvé
+    
+    # Configuration ordres
+    'ENTRY_ORDER_TYPE': 'LIMIT',           # MARKET ou LIMIT
+    'LIMIT_SPREAD_PERCENT': 0.01,          # 0.01% pour prix limit
+    'ORDER_EXECUTION_TIMEOUT': 30,         # Timeout attente exécution (secondes)
+    
+    # Configuration sécurité
+    'MIN_BALANCE': 20,                      # Balance minimale
+    'MAX_POSITIONS': 1,                     # Nb max positions simultanées
+}
+
+# Types d'ordres Binance
+ORDER_TYPES = {
+    'ENTRY_MARKET': 'MARKET',
+    'ENTRY_LIMIT': 'LIMIT',
+    'STOP_LOSS': 'STOP_MARKET',
+    'TAKE_PROFIT': 'LIMIT',
+}
+
+# Configuration sécurité supplémentaire
+SAFETY_CONFIG = {
+    'MAX_DAILY_TRADES': 10,                 # Limite quotidienne de trades
+    'CONFIRM_BEFORE_TRADE': True,           # Demander confirmation avant trade
+    'EMERGENCY_STOP': False,                # Arrêt d'urgence (fermer tout)
+    'LOG_ALL_TRADES': True,                 # Logger tous les trades
+    'LOG_TO_CONSOLE': True,                 # Afficher logs dans console aussi
+}
+
+# Messages et notifications
+TRADING_MESSAGES = {
+    'TRADE_OPENED': '🚀 TRADE OUVERT',
+    'STOP_LOSS_HIT': '🛡️ STOP LOSS DÉCLENCHÉ',
+    'TAKE_PROFIT_HIT': '🎯 TAKE PROFIT ATTEINT',
+    'TRADE_CLOSED': '✅ TRADE FERMÉ',
+    'ERROR_TRADE': '❌ ERREUR TRADE',
 }
 
 # Emojis et symboles pour l'affichage

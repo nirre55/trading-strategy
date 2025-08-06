@@ -3,8 +3,8 @@ from binance_client import BinanceFuturesClient
 
 def test_usdc_balance():
     # Vos clés API
-    api_key = "0Ln7SbE79ve6E46KZWsLM61Axgx1Aoazm1uMYMOWaXFfxme7x39HoDzo3mJNK2NG"
-    api_secret = "E8PnpZfY5xbNDULJKPp6ASLS1Oq91x4bvigqkQ904AUVGDD5drscmppyTGF1C0aK"
+    api_key = "0NG"
+    api_secret = "EaK"
     
     client = BinanceFuturesClient(api_key, api_secret, testnet=False)
     

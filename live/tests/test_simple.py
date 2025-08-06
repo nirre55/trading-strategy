@@ -10,8 +10,8 @@ def test_connection():
     print("🧪 Test de connexion Binance...")
     
     # Configuration
-    api_key = "0Ln7SbE79ve6E46KZWsLM61Axgx1Aoazm1uMYMOWaXFfxme7x39HoDzo3mJNK2NG"
-    api_secret = "E8PnpZfY5xbNDULJKPp6ASLS1Oq91x4bvigqkQ904AUVGDD5drscmppyTGF1C0aK"
+    api_key = "0LnNG"
+    api_secret = "8K"
 
     if not api_key or not api_secret:
         print("❌ Clés API manquantes")

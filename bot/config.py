@@ -4,7 +4,7 @@ Configuration du bot de trading Binance Futures
 
 # Configuration du symbole et timeframe
 SYMBOL = "BTCUSDC"
-TIMEFRAME = "1m"  # 1m, 3m, 5m, 15m, 30m, 1h, 2h, 4h, 6h, 8h, 12h, 1d, 3d, 1w, 1M
+TIMEFRAME = "5m"  # 1m, 3m, 5m, 15m, 30m, 1h, 2h, 4h, 6h, 8h, 12h, 1d, 3d, 1w, 1M
 
 # Configuration des périodes RSI
 RSI_PERIODS = [5, 14, 21]
@@ -83,12 +83,12 @@ ASSET_CONFIG = {
 
 # Configuration Trading avancée
 TRADING_CONFIG = {
-    'ENABLED': False,                       # Trading automatique (désactivé par défaut)
-    'RISK_PERCENT': 10.0,                   # % du capital par trade
+    'ENABLED': True,                       # Trading automatique (désactivé par défaut)
+    'RISK_PERCENT': 5.0,                   # % du capital par trade
     
     # Configuration Take Profit (fixe depuis entrée)
-    'TAKE_PROFIT_PERCENT': 1.5,            # TP à 1.5% depuis prix entrée
-    
+    'TAKE_PROFIT_PERCENT': 0.15,            # TP à 0.15% depuis prix entrée
+
     # Configuration Stop Loss (basé sur bougies)
     'STOP_LOSS_LOOKBACK_CANDLES': 5,       # Regarder 5 dernières bougies
     'STOP_LOSS_OFFSET_PERCENT': 0.1,       # Offset 0.1% depuis low/high trouvé
@@ -96,10 +96,10 @@ TRADING_CONFIG = {
     # Configuration ordres
     'ENTRY_ORDER_TYPE': 'LIMIT',           # MARKET ou LIMIT
     'LIMIT_SPREAD_PERCENT': 0.01,          # 0.01% pour prix limit
-    'ORDER_EXECUTION_TIMEOUT': 30,         # Timeout attente exécution (secondes)
+    'ORDER_EXECUTION_TIMEOUT': 60,         # Timeout attente exécution (secondes)
     
     # Configuration sécurité
-    'MIN_BALANCE': 20,                      # Balance minimale
+    'MIN_BALANCE': 10,                      # Balance minimale
     'MAX_POSITIONS': 1,                     # Nb max positions simultanées
 }
 
@@ -113,8 +113,8 @@ ORDER_TYPES = {
 
 # Configuration sécurité supplémentaire
 SAFETY_CONFIG = {
-    'MAX_DAILY_TRADES': 10,                 # Limite quotidienne de trades
-    'CONFIRM_BEFORE_TRADE': True,           # Demander confirmation avant trade
+    'MAX_DAILY_TRADES': 1000,                 # Limite quotidienne de trades
+    'CONFIRM_BEFORE_TRADE': False,           # Demander confirmation avant trade
     'EMERGENCY_STOP': False,                # Arrêt d'urgence (fermer tout)
     'LOG_ALL_TRADES': True,                 # Logger tous les trades
     'LOG_TO_CONSOLE': True,                 # Afficher logs dans console aussi

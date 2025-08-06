@@ -18,6 +18,21 @@ INITIAL_KLINES_LIMIT = 500
 # Configuration d'affichage
 SHOW_DEBUG = False
 
+# Configuration du filtre Double Heikin Ashi
+DOUBLE_HEIKIN_ASHI_FILTER = {
+    'ENABLED': True,  # True pour activer le double calcul HA
+    'USE_FOR_SIGNALS': True,  # True: utiliser HA2 pour les signaux, False: garder HA1
+    'USE_FOR_RSI': False,  # True: calculer RSI sur HA2, False: calculer RSI sur HA1
+    'SHOW_BOTH_IN_DISPLAY': True,  # True: afficher HA1 et HA2, False: afficher seulement celui utilisé
+    'DESCRIPTION': 'Double Heikin Ashi: Calcul HA sur les données HA pour plus de lissage',
+    
+    # Explications des combinaisons possibles:
+    # ENABLED=True, USE_FOR_SIGNALS=True, USE_FOR_RSI=True   -> Signaux et RSI basés sur HA2 (plus lisse)
+    # ENABLED=True, USE_FOR_SIGNALS=True, USE_FOR_RSI=False  -> Signaux sur HA2, RSI sur HA1 (mixte)
+    # ENABLED=True, USE_FOR_SIGNALS=False, USE_FOR_RSI=True  -> Signaux sur HA1, RSI sur HA2 (mixte) 
+    # ENABLED=True, USE_FOR_SIGNALS=False, USE_FOR_RSI=False -> Double calcul mais utilise HA1 (pour comparaison)
+}
+
 # Configuration des signaux de trading
 SIGNAL_SETTINGS = {
     # Configuration des signaux
@@ -69,6 +84,7 @@ DISPLAY_SYMBOLS = {
     'CONDITION_NOT_MET': '❌',
     'SEPARATOR': '='*60,
     'TRADING_SIGNALS_TITLE': '🎯',
+    'DOUBLE_HA_SYMBOL': '🔄',  # Symbole pour Double HA
 }
 
 # Couleurs pour l'affichage console
@@ -91,4 +107,5 @@ LOG_SETTINGS = {
     'SHOW_SIGNAL_ANALYSIS': False,         # Messages analyse des signaux
     'SHOW_RSI_CALCULATIONS': False,        # Messages calculs RSI
     'SHOW_HA_CALCULATIONS': False,         # Messages calculs Heikin Ashi
+    'SHOW_DOUBLE_HA_CALCULATIONS': False,  # Messages calculs Double Heikin Ashi
 }

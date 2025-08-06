@@ -40,7 +40,7 @@ class TradingSignals:
         
         return all_oversold, all_overbought, "OK"
     
-    def check_long_signal(self, rsi_values, ha_open, ha_close):
+    def check_long_signal(self, rsi_values, ha_open, ha_close, ha_source="HA1"):
         """
         Vérifie les conditions pour un signal LONG
         Mode DELAYED: Une fois RSI en survente détecté, on attend seulement la couleur HA
@@ -56,41 +56,41 @@ class TradingSignals:
             # Mode classique : toutes les conditions en même temps
             signal_valid = all_oversold and ha_green
             if signal_valid:
-                reason = "RSI(5,14,21) < 30 + HA Verte (IMMEDIATE)"
+                reason = f"RSI(5,14,21) < 30 + {ha_source} Verte (IMMEDIATE)"
             else:
-                reason = self._get_rejection_reason(all_oversold, ha_green, "LONG")
+                reason = self._get_rejection_reason(all_oversold, ha_green, "LONG", ha_source)
         else:
             # Mode DELAYED : RSI d'abord, puis attendre couleur HA (SANS annulation)
             if all_oversold and not self.pending_long:
                 # Nouveau état d'attente LONG
                 self.pending_long = True
                 self.pending_short = False  # Annuler attente SHORT si active
-                reason = "🔄 ATTENTE LONG: RSI < 30 détecté, attente bougie HA verte"
+                reason = f"🔄 ATTENTE LONG: RSI < 30 détecté, attente bougie {ha_source} verte"
                 return False, reason
             elif self.pending_long and ha_green:
                 # Signal LONG déclenché ! (peu importe l'état actuel des RSI)
                 signal_valid = True
                 self.pending_long = False
-                reason = "✅ SIGNAL LONG: Attente satisfaite avec HA Verte (DELAYED)"
+                reason = f"✅ SIGNAL LONG: Attente satisfaite avec {ha_source} Verte (DELAYED)"
                 return signal_valid, reason
             elif self.pending_long and not ha_green:
                 # Toujours en attente (on ne vérifie PLUS les RSI)
-                reason = f"🔄 ATTENTE LONG: En attente bougie HA verte"
+                reason = f"🔄 ATTENTE LONG: En attente bougie {ha_source} verte"
                 return False, reason
             elif all_oversold and not self.pending_long:
                 # RSI en survente mais pas encore en attente (cas edge)
                 self.pending_long = True
                 self.pending_short = False
-                reason = "🔄 ATTENTE LONG: RSI < 30 détecté, attente bougie HA verte"
+                reason = f"🔄 ATTENTE LONG: RSI < 30 détecté, attente bougie {ha_source} verte"
                 return False, reason
             else:
                 # Pas de conditions
                 signal_valid = False
-                reason = self._get_rejection_reason(all_oversold, ha_green, "LONG")
+                reason = self._get_rejection_reason(all_oversold, ha_green, "LONG", ha_source)
         
         return signal_valid, reason
     
-    def check_short_signal(self, rsi_values, ha_open, ha_close):
+    def check_short_signal(self, rsi_values, ha_open, ha_close, ha_source="HA1"):
         """
         Vérifie les conditions pour un signal SHORT
         Mode DELAYED: Une fois RSI en surachat détecté, on attend seulement la couleur HA
@@ -106,41 +106,41 @@ class TradingSignals:
             # Mode classique : toutes les conditions en même temps
             signal_valid = all_overbought and ha_red
             if signal_valid:
-                reason = "RSI(5,14,21) > 70 + HA Rouge (IMMEDIATE)"
+                reason = f"RSI(5,14,21) > 70 + {ha_source} Rouge (IMMEDIATE)"
             else:
-                reason = self._get_rejection_reason(all_overbought, ha_red, "SHORT")
+                reason = self._get_rejection_reason(all_overbought, ha_red, "SHORT", ha_source)
         else:
             # Mode DELAYED : RSI d'abord, puis attendre couleur HA (SANS annulation)
             if all_overbought and not self.pending_short:
                 # Nouveau état d'attente SHORT
                 self.pending_short = True
                 self.pending_long = False  # Annuler attente LONG si active
-                reason = "🔄 ATTENTE SHORT: RSI > 70 détecté, attente bougie HA rouge"
+                reason = f"🔄 ATTENTE SHORT: RSI > 70 détecté, attente bougie {ha_source} rouge"
                 return False, reason
             elif self.pending_short and ha_red:
                 # Signal SHORT déclenché ! (peu importe l'état actuel des RSI)
                 signal_valid = True
                 self.pending_short = False
-                reason = "✅ SIGNAL SHORT: Attente satisfaite avec HA Rouge (DELAYED)"
+                reason = f"✅ SIGNAL SHORT: Attente satisfaite avec {ha_source} Rouge (DELAYED)"
                 return signal_valid, reason
             elif self.pending_short and not ha_red:
                 # Toujours en attente (on ne vérifie PLUS les RSI)
-                reason = f"🔄 ATTENTE SHORT: En attente bougie HA rouge"
+                reason = f"🔄 ATTENTE SHORT: En attente bougie {ha_source} rouge"
                 return False, reason
             elif all_overbought and not self.pending_short:
                 # RSI en surachat mais pas encore en attente (cas edge)
                 self.pending_short = True
                 self.pending_long = False
-                reason = "🔄 ATTENTE SHORT: RSI > 70 détecté, attente bougie HA rouge"
+                reason = f"🔄 ATTENTE SHORT: RSI > 70 détecté, attente bougie {ha_source} rouge"
                 return False, reason
             else:
                 # Pas de conditions
                 signal_valid = False
-                reason = self._get_rejection_reason(all_overbought, ha_red, "SHORT")
+                reason = self._get_rejection_reason(all_overbought, ha_red, "SHORT", ha_source)
         
         return signal_valid, reason
     
-    def _get_rejection_reason(self, rsi_condition, ha_condition, signal_type):
+    def _get_rejection_reason(self, rsi_condition, ha_condition, signal_type, ha_source="HA1"):
         """Génère la raison du rejet du signal"""
         if not config.SIGNAL_SETTINGS['SHOW_REJECTION_REASONS']:
             return "Conditions non remplies"
@@ -151,24 +151,30 @@ class TradingSignals:
             if not rsi_condition:
                 reasons.append(f"RSI pas tous < {self.rsi_oversold}")
             if not ha_condition:
-                reasons.append("HA pas verte")
+                reasons.append(f"{ha_source} pas verte")
         else:  # SHORT
             if not rsi_condition:
                 reasons.append(f"RSI pas tous > {self.rsi_overbought}")
             if not ha_condition:
-                reasons.append("HA pas rouge")
+                reasons.append(f"{ha_source} pas rouge")
         
         return " | ".join(reasons) if reasons else "Conditions non remplies"
     
-    def analyze_signals(self, rsi_values, ha_open, ha_close):
+    def analyze_signals(self, rsi_values, ha_open, ha_close, ha_source="HA1"):
         """
         Analyse complète des signaux avec mode DELAYED corrigé
+        
+        Args:
+            rsi_values: Dictionnaire des valeurs RSI
+            ha_open: Prix d'ouverture Heikin Ashi (HA1 ou HA2)
+            ha_close: Prix de clôture Heikin Ashi (HA1 ou HA2)
+            ha_source: Source des données HA ("HA1" ou "HA2")
         """
         # Vérifier signal LONG
-        long_valid, long_reason = self.check_long_signal(rsi_values, ha_open, ha_close)
+        long_valid, long_reason = self.check_long_signal(rsi_values, ha_open, ha_close, ha_source)
         
         # Vérifier signal SHORT
-        short_valid, short_reason = self.check_short_signal(rsi_values, ha_open, ha_close)
+        short_valid, short_reason = self.check_short_signal(rsi_values, ha_open, ha_close, ha_source)
         
         # Déterminer le signal principal
         if long_valid:
@@ -200,7 +206,8 @@ class TradingSignals:
             'pending': {
                 'long': self.pending_long,
                 'short': self.pending_short
-            }
+            },
+            'source': ha_source  # Ajout de la source pour tracking
         }
     
     def get_signal_emoji(self, signal_type):

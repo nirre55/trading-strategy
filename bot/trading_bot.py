@@ -27,6 +27,15 @@ except ImportError as e:
     print(f"⚠️ Modules de trading non disponibles: {e}")
     TRADING_MODULES_AVAILABLE = False
 
+# Import du gestionnaire de connexions
+try:
+    from connection_manager import ConnectionManager
+    CONNECTION_MANAGER_AVAILABLE = True
+    print("✅ ConnectionManager chargé avec succès")
+except ImportError as e:
+    print(f"⚠️ ConnectionManager non disponible: {e}")
+    CONNECTION_MANAGER_AVAILABLE = False
+
 class HeikinAshiRSIBot:
     def __init__(self):
         self.binance_client = BinanceClient()
@@ -40,6 +49,10 @@ class HeikinAshiRSIBot:
         self.position_manager = None
         self.trade_executor = None
         self.trading_enabled = False
+        self.trading_blocked_by_position = False  # Nouveau: blocage par position existante
+        
+        # Gestionnaire de connexions (si disponible)
+        self.connection_manager = None
         
         if TRADING_MODULES_AVAILABLE and config.TRADING_CONFIG.get('ENABLED', False):
             try:
@@ -55,6 +68,15 @@ class HeikinAshiRSIBot:
         else:
             print(f"📊 {config.COLORS['yellow']}Mode analyse seulement (trading désactivé){config.COLORS['reset']}")
             trading_logger.system_status("Mode analyse seulement")
+        
+        # Initialiser ConnectionManager si disponible
+        if CONNECTION_MANAGER_AVAILABLE:
+            try:
+                self.connection_manager = ConnectionManager(self)
+                print(f"✅ {config.COLORS['cyan']}Gestionnaire de connexions activé{config.COLORS['reset']}")
+            except Exception as e:
+                print(f"⚠️ Erreur initialisation ConnectionManager: {e}")
+                self.connection_manager = None
         
         # Configuration du gestionnaire de signal pour arrêt propre
         signal.signal(signal.SIGINT, self.signal_handler)
@@ -83,8 +105,13 @@ class HeikinAshiRSIBot:
         print(f"\n{config.COLORS['yellow']}Arrêt du bot en cours...{config.COLORS['reset']}")
         trading_logger.system_status("Arrêt du bot demandé")
         
-        # Arrêter le trading en premier
-        if self.trade_executor:
+        # Arrêter le gestionnaire de connexions en premier
+        if self.connection_manager is not None:
+            print("🛑 Arrêt du gestionnaire de connexions...")
+            self.connection_manager.stop_reconnection()
+        
+        # Arrêter le trading
+        if self.trade_executor is not None:
             print("🛑 Arrêt du monitoring des trades...")
             self.trade_executor.stop_monitoring()
         
@@ -209,6 +236,18 @@ class HeikinAshiRSIBot:
                 error_msg = "Modules de trading non disponibles"
                 print(f"❌ {error_msg}")
                 trading_logger.error_occurred("TRADING_MODULES", error_msg)
+                return False
+            
+            # NOUVEAU: Vérification conditions post-synchronisation
+            if self.connection_manager is not None:
+                if not self.connection_manager.validate_trade_conditions_post_sync():
+                    # Message déjà affiché dans validate_trade_conditions_post_sync
+                    return False
+            
+            # Vérification blocage par position existante
+            if self.trading_blocked_by_position:
+                print(f"🚫 TRADE BLOQUÉ: Position existante détectée lors de la synchronisation")
+                trading_logger.warning("Trade bloqué par position existante")
                 return False
             
             signal_type = signal_data['type']
@@ -453,14 +492,26 @@ class HeikinAshiRSIBot:
         if config.DOUBLE_HEIKIN_ASHI_FILTER['ENABLED']:
             source_indicator = f" {config.COLORS['cyan']}[{display_data['ha_source']}]{config.COLORS['reset']}"
         
-        # Indicateur de trading automatique
+        # Indicateur de trading automatique + état connexion
         trading_indicator = ""
         if self.trading_enabled:
             trading_indicator = f" {config.COLORS['magenta']}🤖{config.COLORS['reset']}"
         
+        # NOUVEAU: Indicateur d'état connexion
+        connection_indicator = ""
+        if self.connection_manager is not None:
+            status = self.connection_manager.get_connection_status()
+            if not status['websocket_connected']:
+                if status['reconnection_active']:
+                    connection_indicator = f" {config.COLORS['yellow']}🔄{status['reconnection_count']}{config.COLORS['reset']}"
+                else:
+                    connection_indicator = f" {config.COLORS['red']}💥{config.COLORS['reset']}"
+            elif status['safe_mode_active']:
+                connection_indicator = f" {config.COLORS['cyan']}🛡️{config.COLORS['reset']}"
+        
         rsi_line = " | ".join(rsi_info)
-        print(f"[{timestamp}] {ha_symbol} {ha_color}{candle_color.upper()}{config.COLORS['reset']}{source_indicator} | RSI: {rsi_line}{signal_indicator}{trading_indicator}")
-    
+        print(f"[{timestamp}] {ha_symbol} {ha_color}{candle_color.upper()}{config.COLORS['reset']}{source_indicator} | RSI: {rsi_line}{signal_indicator}{trading_indicator}{connection_indicator}")
+        
     def should_display_results(self, signals_analysis):
         """Détermine si on doit afficher les résultats selon la configuration"""
         signal_valid = signals_analysis['valid']
@@ -709,6 +760,11 @@ class HeikinAshiRSIBot:
             print("        🤖 TRADING AUTOMATIQUE ACTIVÉ 🤖")
         else:
             print("           📊 MODE ANALYSE SEULEMENT")
+        
+        # NOUVEAU: Affichage état ConnectionManager
+        if self.connection_manager is not None:
+            print("        🔄 RECONNEXION AUTOMATIQUE ACTIVÉE")
+        
         print("=" * 60)
         print(f"{config.COLORS['reset']}")
         
@@ -718,6 +774,14 @@ class HeikinAshiRSIBot:
         print(f"  Périodes RSI: {config.RSI_PERIODS}")
         print(f"  Données historiques: {config.INITIAL_KLINES_LIMIT} bougies")
         
+        # NOUVEAU: Affichage configuration connexions
+        if self.connection_manager is not None:
+            print(f"\n{config.COLORS['cyan']}Configuration Connexions:{config.COLORS['reset']}")
+            print(f"  Retry automatique: {config.CONNECTION_CONFIG.get('WEBSOCKET_RETRY_ENABLED', True)}")
+            print(f"  Intervalle retry: {config.CONNECTION_CONFIG.get('WEBSOCKET_RETRY_INTERVAL', 30)}s")
+            print(f"  Max tentatives: {config.CONNECTION_CONFIG.get('WEBSOCKET_MAX_RETRIES', 0)} (0=infini)")
+            print(f"  Synchronisation auto: {config.CONNECTION_CONFIG.get('SYNC_AFTER_RECONNECTION', True)}")
+        
         if self.trading_enabled:
             print(f"\n{config.COLORS['magenta']}Configuration Trading:{config.COLORS['reset']}")
             print(f"  Asset: {config.ASSET_CONFIG['BALANCE_ASSET']}")
@@ -725,6 +789,7 @@ class HeikinAshiRSIBot:
             print(f"  Take Profit: {config.TRADING_CONFIG['TAKE_PROFIT_PERCENT']}%")
             print(f"  Stop Loss: {config.TRADING_CONFIG['STOP_LOSS_LOOKBACK_CANDLES']} bougies + {config.TRADING_CONFIG['STOP_LOSS_OFFSET_PERCENT']}%")
             print(f"  Type d'ordre: {config.TRADING_CONFIG['ENTRY_ORDER_TYPE']}")
+            print(f"  Fallback Market: {config.TRADING_CONFIG.get('MARKET_FALLBACK_ENABLED', True)}")
             
             # Afficher balance initiale
             if self.position_manager is not None:
@@ -747,13 +812,22 @@ class HeikinAshiRSIBot:
             self.on_kline_update
         )
         
+        # NOUVEAU: Attacher ConnectionManager au WebSocket
+        if self.connection_manager is not None:
+            self.ws_handler.connection_manager = self.connection_manager
+        
         self.ws_handler.start()
         
         if not self.ws_handler.wait_for_connection():
             error_msg = "Impossible de se connecter au WebSocket"
             print(error_msg)
             trading_logger.error_occurred("WEBSOCKET_CONNECTION", error_msg)
-            return
+            
+            # NOUVEAU: Même en cas d'échec initial, continuer si ConnectionManager disponible
+            if self.connection_manager is not None:
+                print(f"{config.COLORS['yellow']}ConnectionManager va tenter des reconnexions automatiques...{config.COLORS['reset']}")
+            else:
+                return
         
         success_msg = "Bot démarré avec succès!"
         print(f"{config.COLORS['green']}{success_msg}{config.COLORS['reset']}")
@@ -762,14 +836,23 @@ class HeikinAshiRSIBot:
         if self.trading_enabled:
             print(f"{config.COLORS['magenta']}🤖 Trading automatique en cours...{config.COLORS['reset']}")
         
+        if self.connection_manager is not None:
+            print(f"{config.COLORS['cyan']}🔄 Reconnexion automatique activée{config.COLORS['reset']}")
+        
         print(f"{config.COLORS['yellow']}Appuyez sur Ctrl+C pour arrêter{config.COLORS['reset']}")
         
         # Initialiser compteur quotidien
         self.daily_trades_count = 0
         
+        # NOUVEAU: Synchronisation initiale si positions existantes
+        if self.connection_manager is not None and self.trading_enabled:
+            print(f"\n{config.COLORS['cyan']}Vérification synchronisation initiale...{config.COLORS['reset']}")
+            self.connection_manager.sync_state_after_reconnection()
+        
         # Boucle principale
         try:
-            while self.running and self.ws_handler.is_running:
+            while self.running:
+                # NOUVEAU: La boucle continue même si WebSocket déconnecté
                 time.sleep(1)
         except KeyboardInterrupt:
             self.signal_handler(None, None)

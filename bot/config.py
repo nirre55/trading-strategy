@@ -101,6 +101,10 @@ TRADING_CONFIG = {
     # Configuration sécurité
     'MIN_BALANCE': 10,                      # Balance minimale
     'MAX_POSITIONS': 1,                     # Nb max positions simultanées
+
+    # Configuration Fallback Market (NOUVEAU)
+    'MARKET_FALLBACK_ENABLED': True,       # Activer fallback MARKET après timeout LIMIT
+    'FALLBACK_MAX_SLIPPAGE': 0.03,         # Slippage maximum accepté pour fallback (%)
 }
 
 # Types d'ordres Binance
@@ -118,6 +122,21 @@ SAFETY_CONFIG = {
     'EMERGENCY_STOP': False,                # Arrêt d'urgence (fermer tout)
     'LOG_ALL_TRADES': True,                 # Logger tous les trades
     'LOG_TO_CONSOLE': True,                 # Afficher logs dans console aussi
+}
+
+# Configuration de connexion et résilience (NOUVEAU)
+CONNECTION_CONFIG = {
+'WEBSOCKET_RETRY_ENABLED': True,        # Activer reconnexion automatique WebSocket
+    'WEBSOCKET_RETRY_INTERVAL': 30,         # Délai entre tentatives reconnexion (secondes)
+    'WEBSOCKET_MAX_RETRIES': 0,             # Max tentatives (0 = infini)
+    'WEBSOCKET_BACKOFF_MAX': 300,           # Délai maximum entre tentatives (5 min)
+    'WEBSOCKET_HEALTH_CHECK': 60,           # Intervalle vérification santé connexion
+    
+    'SYNC_AFTER_RECONNECTION': True,        # Synchronisation obligatoire après reconnexion
+    'BLOCK_TRADES_ON_POSITION': True,       # Bloquer nouveaux trades si position détectée
+    'SYNC_VALIDATION_TIMEOUT': 30,          # Timeout pour validation synchronisation
+    'AUTO_CLEANUP_GHOST_TRADES': True,      # Nettoyage automatique trades fantômes
+    'SAFE_MODE_DURATION': 300,              # Durée mode sécurisé après reconnexion (5 min)
 }
 
 # Messages et notifications

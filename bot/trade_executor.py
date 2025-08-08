@@ -222,6 +222,78 @@ class TradeExecutor:
             print(f"❌ Erreur attente exécution: {e}")
             return None
     
+    def execute_market_fallback(self, side, quantity, original_order_type):
+        """
+        Exécute un ordre MARKET en fallback après échec d'un ordre LIMIT
+        
+        Args:
+            side: 'BUY' ou 'SELL'
+            quantity: Quantité à trader
+            original_order_type: Type d'ordre original pour les logs
+            
+        Returns:
+            dict: Résultat de l'ordre MARKET ou None si échec
+        """
+        try:
+            print(f"⚡ FALLBACK MARKET: Exécution ordre {side} {quantity} après échec {original_order_type}")
+            
+            # Vérifier si fallback activé dans config
+            if not config.TRADING_CONFIG.get('MARKET_FALLBACK_ENABLED', True):
+                print("🚫 Fallback MARKET désactivé dans configuration")
+                return None
+            
+            # Récupérer prix actuel pour validation
+            current_price = self.get_current_price()
+            if not current_price:
+                print("❌ Impossible de récupérer prix actuel pour fallback")
+                return None
+            
+            print(f"📊 Prix actuel pour fallback: {current_price}")
+            
+            # Placer ordre MARKET
+            order = self.client.futures_create_order(
+                symbol=config.ASSET_CONFIG['SYMBOL'],
+                side=side,
+                type='MARKET',
+                quantity=quantity
+            )
+            
+            order_id = order['orderId']
+            print(f"⚡ Ordre MARKET fallback placé: {order_id}")
+            
+            # Attendre exécution (MARKET généralement instantané)
+            time.sleep(0.5)
+            executed_price, executed_quantity = self._get_executed_order_details(order_id)
+            
+            if executed_price and executed_quantity:
+                # Calculer slippage par rapport au prix attendu
+                if original_order_type == 'LIMIT':
+                    slippage = abs(executed_price - current_price) / current_price * 100
+                    print(f"📊 Slippage fallback: {slippage:.3f}%")
+                
+                print(f"✅ Fallback MARKET exécuté avec succès:")
+                print(f"   Prix d'exécution: {executed_price}")
+                print(f"   Quantité: {executed_quantity}")
+                
+                return {
+                    'order_id': order_id,
+                    'executed_price': executed_price,
+                    'executed_quantity': executed_quantity,
+                    'status': 'FILLED',
+                    'is_fallback': True,
+                    'original_type': original_order_type
+                }
+            else:
+                print("❌ Échec récupération détails ordre MARKET fallback")
+                return None
+                
+        except BinanceAPIException as e:
+            print(f"❌ Erreur API fallback MARKET: {e}")
+            return None
+        except Exception as e:
+            print(f"❌ Erreur fallback MARKET: {e}")
+            return None
+    
     def _get_executed_order_details(self, order_id):
         """Récupère les détails d'un ordre exécuté"""
         try:
@@ -417,14 +489,34 @@ class TradeExecutor:
                     config.TRADING_CONFIG['ORDER_EXECUTION_TIMEOUT']
                 )
                 
-                if not execution_result or execution_result['status'] != 'FILLED':
-                    print("❌ Ordre d'entrée non exécuté dans les temps")
+                if execution_result and execution_result['status'] == 'FILLED':
+                    # Ordre LIMIT exécuté avec succès
+                    entry_result['executed_price'] = execution_result['executed_price']
+                    entry_result['executed_quantity'] = execution_result['executed_quantity']
+                    entry_result['status'] = 'FILLED'
+                    
+                elif execution_result and execution_result['status'] == 'TIMEOUT':
+                    # TIMEOUT - Tenter fallback MARKET si activé
+                    print(f"⏰ Ordre LIMIT timeout - Tentative fallback MARKET")
+                    
+                    fallback_result = self.execute_market_fallback(
+                        entry_side, 
+                        quantity, 
+                        'LIMIT'
+                    )
+                    
+                    if fallback_result and fallback_result['status'] == 'FILLED':
+                        # Fallback MARKET réussi
+                        entry_result = fallback_result
+                        print(f"✅ Fallback MARKET réussi - Trade continue")
+                    else:
+                        # Fallback échoué aussi
+                        print("❌ Fallback MARKET échoué - Trade abandonné")
+                        return None
+                else:
+                    # Autre erreur d'exécution
+                    print("❌ Ordre d'entrée non exécuté - Trade abandonné")
                     return None
-                
-                # Mettre à jour avec les données d'exécution
-                entry_result['executed_price'] = execution_result['executed_price']
-                entry_result['executed_quantity'] = execution_result['executed_quantity']
-                entry_result['status'] = 'FILLED'
             
             executed_price = entry_result['executed_price']
             executed_quantity = entry_result['executed_quantity']

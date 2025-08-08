@@ -144,14 +144,43 @@ class TradingLogger:
     
     def order_executed(self, order_type, order_details):
         """Log exécution d'ordre"""
+        is_fallback = order_details.get('is_fallback', False)
+        fallback_info = " (FALLBACK)" if is_fallback else ""
+        
         message = (
-            f"ORDRE {order_type} EXÉCUTÉ | "
+            f"ORDRE {order_type}{fallback_info} EXÉCUTÉ | "
             f"ID: {order_details.get('order_id', 'N/A')} | "
             f"Prix: {order_details.get('executed_price', 'N/A')} | "
             f"Quantité: {order_details.get('executed_quantity', 'N/A')}"
         )
+        
+        if is_fallback:
+            original_type = order_details.get('original_type', 'UNKNOWN')
+            message += f" | Original: {original_type}"
+        
         self.info(message)
         self.trade_logger.info(message)
+    
+    def fallback_executed(self, fallback_type, original_type, slippage=None):
+        """Log exécution de fallback"""
+        message = f"FALLBACK {fallback_type} EXÉCUTÉ | Original: {original_type}"
+        if slippage is not None:
+            message += f" | Slippage: {slippage:.3f}%"
+        
+        self.warning(message)  # Warning car fallback = situation non idéale
+        self.trade_logger.warning(message)
+    
+    def fallback_failed(self, fallback_type, original_type, reason):
+        """Log échec de fallback"""
+        message = f"FALLBACK {fallback_type} ÉCHOUÉ | Original: {original_type} | Raison: {reason}"
+        self.error(message)
+        self.trade_logger.error(message)
+    
+    def timeout_order(self, order_id, order_type, timeout_duration):
+        """Log timeout d'ordre"""
+        message = f"TIMEOUT ORDRE {order_type} | ID: {order_id} | Durée: {timeout_duration}s"
+        self.warning(message)
+        self.trade_logger.warning(message)
     
     def trade_closed(self, trade_id, close_reason, close_details=None):
         """Log fermeture de trade"""

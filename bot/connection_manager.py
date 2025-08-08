@@ -291,6 +291,7 @@ class ConnectionManager:
         try:
             # Vérification positions en temps réel
             if self.bot.position_manager is None:
+                trading_logger.error_occurred("POST_SYNC_VALIDATION", "PositionManager indisponible")
                 return False
             
             current_positions = self.bot.position_manager.get_current_positions()

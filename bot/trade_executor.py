@@ -9,6 +9,7 @@ from binance.client import Client
 from binance.exceptions import BinanceAPIException
 import config
 from position_manager import PositionManager, load_api_credentials_from_env
+from trading_logger import trading_logger
 
 class TradeExecutor:
     def __init__(self):
@@ -37,6 +38,7 @@ class TradeExecutor:
             
         except Exception as e:
             print(f"❌ Erreur initialisation TradeExecutor: {e}")
+            trading_logger.error_occurred("INIT_TRADE_EXECUTOR", str(e))
             raise
     
     def get_current_price(self):
@@ -49,9 +51,11 @@ class TradeExecutor:
             
         except BinanceAPIException as e:
             print(f"❌ Erreur API récupération prix: {e}")
+            trading_logger.error_occurred("GET_PRICE_API", str(e))
             return None
         except Exception as e:
             print(f"❌ Erreur récupération prix: {e}")
+            trading_logger.error_occurred("GET_PRICE", str(e))
             return None
     
     def calculate_limit_entry_price(self, side, current_price, spread_percent):
@@ -83,6 +87,7 @@ class TradeExecutor:
             
         except Exception as e:
             print(f"❌ Erreur calcul prix limit: {e}")
+            trading_logger.error_occurred("CALCUL_LIMIT_PRICE", str(e))
             return None
     
     def place_entry_order(self, side, quantity, order_type="MARKET", limit_price=None):
@@ -145,9 +150,11 @@ class TradeExecutor:
                 
         except BinanceAPIException as e:
             print(f"❌ Erreur API placement ordre: {e}")
+            trading_logger.error_occurred("PLACE_ENTRY_ORDER_API", str(e))
             return None
         except Exception as e:
             print(f"❌ Erreur placement ordre: {e}")
+            trading_logger.error_occurred("PLACE_ENTRY_ORDER", str(e))
             return None
     
     def wait_for_order_execution(self, order_id, timeout=30):
@@ -217,9 +224,11 @@ class TradeExecutor:
             
         except BinanceAPIException as e:
             print(f"❌ Erreur API attente exécution: {e}")
+            trading_logger.error_occurred("WAIT_ORDER_EXEC_API", str(e))
             return None
         except Exception as e:
             print(f"❌ Erreur attente exécution: {e}")
+            trading_logger.error_occurred("WAIT_ORDER_EXEC", str(e))
             return None
     
     def execute_market_fallback(self, side, quantity, original_order_type):
@@ -289,9 +298,11 @@ class TradeExecutor:
                 
         except BinanceAPIException as e:
             print(f"❌ Erreur API fallback MARKET: {e}")
+            trading_logger.error_occurred("FALLBACK_MARKET_API", str(e))
             return None
         except Exception as e:
             print(f"❌ Erreur fallback MARKET: {e}")
+            trading_logger.error_occurred("FALLBACK_MARKET", str(e))
             return None
     
     def _get_executed_order_details(self, order_id):
@@ -309,6 +320,7 @@ class TradeExecutor:
             
         except Exception as e:
             print(f"⚠️ Erreur récupération détails ordre: {e}")
+            trading_logger.error_occurred("GET_ORDER_DETAILS", str(e))
             return None, None
     
     def place_stop_loss_order(self, side, quantity, stop_price, trade_id):
@@ -346,9 +358,11 @@ class TradeExecutor:
             
         except BinanceAPIException as e:
             print(f"❌ Erreur API placement Stop Loss: {e}")
+            trading_logger.error_occurred("PLACE_SL_API", str(e))
             return None
         except Exception as e:
             print(f"❌ Erreur placement Stop Loss: {e}")
+            trading_logger.error_occurred("PLACE_SL", str(e))
             return None
     
     def place_take_profit_order(self, side, quantity, limit_price, trade_id):
@@ -387,9 +401,11 @@ class TradeExecutor:
             
         except BinanceAPIException as e:
             print(f"❌ Erreur API placement Take Profit: {e}")
+            trading_logger.error_occurred("PLACE_TP_API", str(e))
             return None
         except Exception as e:
             print(f"❌ Erreur placement Take Profit: {e}")
+            trading_logger.error_occurred("PLACE_TP", str(e))
             return None
     
     def cancel_order(self, order_id):
@@ -404,9 +420,11 @@ class TradeExecutor:
             
         except BinanceAPIException as e:
             print(f"❌ Erreur API annulation ordre {order_id}: {e}")
+            trading_logger.error_occurred("CANCEL_ORDER_API", str(e))
             return False
         except Exception as e:
             print(f"❌ Erreur annulation ordre {order_id}: {e}")
+            trading_logger.error_occurred("CANCEL_ORDER", str(e))
             return False
     
     def execute_complete_trade(self, side, candles_data, signal_data=None):
@@ -428,6 +446,7 @@ class TradeExecutor:
             validation = self.position_manager.validate_trade_conditions()
             if not validation['status']:
                 print(f"❌ Validation échouée: {validation['message']}")
+                trading_logger.trade_conditions_check(validation)
                 return None
             
             # 2. Récupération données de base
@@ -436,6 +455,7 @@ class TradeExecutor:
             
             if not current_price:
                 print("❌ Impossible de récupérer le prix actuel")
+                trading_logger.trade_failed("PRIX_ACTUEL_INDISPONIBLE", signal_data)
                 return None
             
             # 3. Calcul Stop Loss basé sur les bougies
@@ -449,6 +469,7 @@ class TradeExecutor:
             
             if not sl_price:
                 print("❌ Impossible de calculer le Stop Loss")
+                trading_logger.trade_failed("CALCUL_SL_IMPOSSIBLE", signal_data)
                 return None
             
             # 4. Calcul taille de position
@@ -461,6 +482,7 @@ class TradeExecutor:
             
             if quantity <= 0:
                 print("❌ Taille de position invalide")
+                trading_logger.trade_failed("TAILLE_POSITION_INVALIDE", signal_data)
                 return None
             
             # 5. Préparation ordre d'entrée
@@ -480,6 +502,7 @@ class TradeExecutor:
             
             if not entry_result:
                 print("❌ Échec placement ordre d'entrée")
+                trading_logger.trade_failed("ECHEC_ORDER_ENTREE", signal_data)
                 return None
             
             # 7. Attendre exécution si ordre LIMIT
@@ -498,6 +521,7 @@ class TradeExecutor:
                 elif execution_result and execution_result['status'] == 'TIMEOUT':
                     # TIMEOUT - Tenter fallback MARKET si activé
                     print(f"⏰ Ordre LIMIT timeout - Tentative fallback MARKET")
+                    trading_logger.timeout_order(entry_result['order_id'], 'LIMIT', config.TRADING_CONFIG['ORDER_EXECUTION_TIMEOUT'])
                     
                     fallback_result = self.execute_market_fallback(
                         entry_side, 
@@ -509,13 +533,16 @@ class TradeExecutor:
                         # Fallback MARKET réussi
                         entry_result = fallback_result
                         print(f"✅ Fallback MARKET réussi - Trade continue")
+                        trading_logger.fallback_executed('MARKET', 'LIMIT')
                     else:
                         # Fallback échoué aussi
                         print("❌ Fallback MARKET échoué - Trade abandonné")
+                        trading_logger.fallback_failed('MARKET', 'LIMIT', 'EXECUTION_ECHOUEE')
                         return None
                 else:
                     # Autre erreur d'exécution
                     print("❌ Ordre d'entrée non exécuté - Trade abandonné")
+                    trading_logger.trade_failed("ENTREE_NON_EXECUTEE", signal_data)
                     return None
             
             executed_price = entry_result['executed_price']
@@ -534,6 +561,7 @@ class TradeExecutor:
                 print("❌ Impossible de calculer le Take Profit")
                 # Fermer la position immédiatement
                 self._emergency_close_position(entry_side, executed_quantity)
+                trading_logger.trade_failed("CALCUL_TP_IMPOSSIBLE", signal_data)
                 return None
             
             # 9. Créer un ID unique pour ce trade
@@ -575,6 +603,7 @@ class TradeExecutor:
             
             if not sl_order_id or not tp_order_id:
                 print("⚠️ Échec placement SL/TP - Position ouverte sans protection!")
+                trading_logger.warning("SL_TP_NON_PLACES - Position sans protection")
                 # TODO: Implementer fermeture d'urgence
             
             # 13. Démarrer monitoring si pas déjà actif
@@ -605,6 +634,7 @@ class TradeExecutor:
             
         except Exception as e:
             print(f"❌ Erreur exécution trade: {e}")
+            trading_logger.trade_failed(str(e), signal_data)
             return None
     
     def _emergency_close_position(self, original_side, quantity):
@@ -623,6 +653,7 @@ class TradeExecutor:
             
         except Exception as e:
             print(f"❌ Erreur fermeture d'urgence: {e}")
+            trading_logger.error_occurred("EMERGENCY_CLOSE", str(e))
     
     def start_order_monitoring(self):
         """Démarre la surveillance des ordres dans un thread séparé"""

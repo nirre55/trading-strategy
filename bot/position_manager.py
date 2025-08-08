@@ -6,6 +6,7 @@ from binance.client import Client
 from binance.exceptions import BinanceAPIException
 import pandas as pd
 import config
+from trading_logger import trading_logger
 
 def load_api_credentials_from_env(key_name, filename=".env"):
     env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), filename)
@@ -42,6 +43,7 @@ class PositionManager:
             
         except Exception as e:
             print(f"❌ Erreur initialisation PositionManager: {e}")
+            trading_logger.error_occurred("INIT_POSITION_MANAGER", str(e))
             raise
     
     def _load_symbol_info(self):
@@ -84,13 +86,17 @@ class PositionManager:
                     print(f"   Min Qty: {min_qty} | Min Notional: {min_notional}")
                     return
             
-            raise ValueError(f"Symbole {symbol} non trouvé")
+            msg = f"Symbole {symbol} non trouvé"
+            trading_logger.error_occurred("LOAD_SYMBOL_INFO", msg)
+            raise ValueError(msg)
             
         except BinanceAPIException as e:
             print(f"❌ Erreur API lors du chargement info symbole: {e}")
+            trading_logger.error_occurred("LOAD_SYMBOL_INFO_API", str(e))
             raise
         except Exception as e:
             print(f"❌ Erreur lors du chargement info symbole: {e}")
+            trading_logger.error_occurred("LOAD_SYMBOL_INFO", str(e))
             raise
     
     def get_account_balance(self, asset="USDT"):
@@ -110,9 +116,11 @@ class PositionManager:
             
         except BinanceAPIException as e:
             print(f"❌ Erreur API lors récupération balance: {e}")
+            trading_logger.error_occurred("BALANCE_API", str(e))
             return 0.0
         except Exception as e:
             print(f"❌ Erreur lors récupération balance: {e}")
+            trading_logger.error_occurred("BALANCE", str(e))
             return 0.0
     
     def get_symbol_info(self):
@@ -189,6 +197,7 @@ class PositionManager:
             
         except Exception as e:
             print(f"❌ Erreur calcul Stop Loss: {e}")
+            trading_logger.error_occurred("CALCUL_SL", str(e))
             return None
     
     def calculate_take_profit_price(self, entry_price, side, tp_percent):
@@ -220,6 +229,7 @@ class PositionManager:
             
         except Exception as e:
             print(f"❌ Erreur calcul Take Profit: {e}")
+            trading_logger.error_occurred("CALCUL_TP", str(e))
             return None
     
     def calculate_position_size(self, balance, risk_percent, entry_price, stop_loss_price):
@@ -276,6 +286,7 @@ class PositionManager:
             
         except Exception as e:
             print(f"❌ Erreur calcul taille position: {e}")
+            trading_logger.error_occurred("CALCUL_POSITION", str(e))
             return 0
     
     def get_current_positions(self):
@@ -309,9 +320,11 @@ class PositionManager:
             
         except BinanceAPIException as e:
             print(f"❌ Erreur API récupération positions: {e}")
+            trading_logger.error_occurred("POSITIONS_API", str(e))
             return []
         except Exception as e:
             print(f"❌ Erreur récupération positions: {e}")
+            trading_logger.error_occurred("POSITIONS", str(e))
             return []
     
     def validate_trade_conditions(self, required_balance=None):
@@ -329,13 +342,20 @@ class PositionManager:
             try:
                 server_time = self.client.futures_time()
                 if not server_time:
-                    return {'status': False, 'message': 'Connexion API échouée'}
-            except:
-                return {'status': False, 'message': 'Impossible de se connecter à Binance'}
+                    result = {'status': False, 'message': 'Connexion API échouée'}
+                    trading_logger.trade_conditions_check(result)
+                    return result
+            except Exception as e:
+                result = {'status': False, 'message': 'Impossible de se connecter à Binance'}
+                trading_logger.error_occurred("API_CONNECT", str(e))
+                trading_logger.trade_conditions_check(result)
+                return result
             
             # Vérifier status du symbole
             if self.symbol_info_cache.get('status') != 'TRADING':
-                return {'status': False, 'message': f"Symbole {config.ASSET_CONFIG['SYMBOL']} non disponible pour trading"}
+                result = {'status': False, 'message': f"Symbole {config.ASSET_CONFIG['SYMBOL']} non disponible pour trading"}
+                trading_logger.trade_conditions_check(result)
+                return result
             
             # Vérifier balance
             balance_asset = config.ASSET_CONFIG['BALANCE_ASSET']
@@ -343,17 +363,24 @@ class PositionManager:
             
             min_balance = required_balance or config.TRADING_CONFIG['MIN_BALANCE']
             if balance < min_balance:
-                return {'status': False, 'message': f'Balance insuffisante: {balance} < {min_balance} {balance_asset}'}
+                result = {'status': False, 'message': f'Balance insuffisante: {balance} < {min_balance} {balance_asset}'}
+                trading_logger.trade_conditions_check(result)
+                return result
             
             # Vérifier positions existantes si limite activée
             if config.TRADING_CONFIG['MAX_POSITIONS'] > 0:
                 current_positions = self.get_current_positions()
                 if len(current_positions) >= config.TRADING_CONFIG['MAX_POSITIONS']:
-                    return {'status': False, 'message': f'Limite positions atteinte: {len(current_positions)}/{config.TRADING_CONFIG["MAX_POSITIONS"]}'}
+                    result = {'status': False, 'message': f'Limite positions atteinte: {len(current_positions)}/{config.TRADING_CONFIG["MAX_POSITIONS"]}'}
+                    trading_logger.trade_conditions_check(result)
+                    return result
             
-            return {'status': True, 'message': 'Conditions validées'}
+            result = {'status': True, 'message': 'Conditions validées'}
+            trading_logger.trade_conditions_check(result)
+            return result
             
         except Exception as e:
+            trading_logger.error_occurred("VALIDATE_CONDITIONS", str(e))
             return {'status': False, 'message': f'Erreur validation: {str(e)}'}
 
 if __name__ == "__main__":

@@ -5,6 +5,7 @@ import requests
 import pandas as pd
 from datetime import datetime
 import config
+from trading_logger import trading_logger
 
 class BinanceClient:
     def __init__(self):
@@ -47,9 +48,19 @@ class BinanceClient:
             
         except requests.exceptions.RequestException as e:
             print(f"Erreur lors de la récupération des données historiques: {e}")
+            trading_logger.error_occurred(
+                "HISTORICAL_DATA",
+                f"Requête échouée: {type(e).__name__} - {e}",
+                context=f"endpoint={endpoint} symbol={symbol} interval={interval} limit={limit}"
+            )
             return None
         except Exception as e:
             print(f"Erreur lors du traitement des données: {e}")
+            trading_logger.error_occurred(
+                "HISTORICAL_DATA_PROCESSING",
+                str(e),
+                context=f"symbol={symbol} interval={interval} limit={limit}"
+            )
             return None
     
     def format_kline_data(self, kline_data):

@@ -228,7 +228,17 @@ class HeikinAshiRSIBot:
         """
         try:
             # Vérifications préliminaires
-            if not self.trading_enabled or not signal_data['valid']:
+            if not self.trading_enabled:
+                try:
+                    trading_logger.info("Trade ignoré: trading désactivé")
+                except Exception:
+                    pass
+                return False
+            if not signal_data.get('valid', False):
+                try:
+                    trading_logger.info("Trade ignoré: signal invalide")
+                except Exception:
+                    pass
                 return False
             
             # Vérification que les modules de trading sont disponibles

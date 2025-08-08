@@ -8,6 +8,7 @@ import time
 from datetime import datetime
 from typing import Optional, TYPE_CHECKING
 import config
+from trading_logger import trading_logger
 
 if TYPE_CHECKING:
     from connection_manager import ConnectionManager
@@ -45,17 +46,27 @@ class BinanceWebSocketHandler:
                 
         except json.JSONDecodeError as e:
             print(f"Erreur lors du décodage JSON: {e}")
+            trading_logger.error_occurred("WS_JSON_DECODE", str(e))
         except Exception as e:
             print(f"Erreur lors du traitement du message: {e}")
+            trading_logger.error_occurred("WS_MESSAGE", str(e))
     
     def on_error(self, ws, error):
         """Callback appelé en cas d'erreur"""
         print(f"Erreur WebSocket: {error}")
         # Ne pas arrêter is_running ici - laisser ConnectionManager gérer
+        try:
+            trading_logger.error_occurred("WEBSOCKET_ERROR", str(error))
+        except Exception:
+            pass
     
     def on_close(self, ws, close_status_code, close_msg):
         """Callback appelé lors de la fermeture de la connexion"""
         print(f"Connexion WebSocket fermée (code: {close_status_code})")
+        try:
+            trading_logger.error_occurred("WEBSOCKET_CLOSED", f"code={close_status_code} msg={close_msg}")
+        except Exception:
+            pass
         
         # IMPORTANT: Ne plus mettre is_running = False ici
         # Laisser ConnectionManager gérer la reconnexion

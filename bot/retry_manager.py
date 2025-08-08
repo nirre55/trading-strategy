@@ -5,25 +5,7 @@ import time
 import functools
 from typing import Callable, Any, Tuple
 
-try:
-    # Exceptions réseau courantes
-    from binance.exceptions import BinanceAPIException
-except Exception:  # pragma: no cover - binance peut ne pas être installé en test local
-    class BinanceAPIException(Exception):
-        pass
-
-try:
-    import requests.exceptions as requests_exceptions
-except Exception:  # pragma: no cover
-    class _DummyReqEx(Exception):
-        pass
-    class requests_exceptions:  # type: ignore
-        RequestException = _DummyReqEx
-        ConnectionError = _DummyReqEx
-        Timeout = _DummyReqEx
-
 import config
-
 
 class RetryManager:
     @staticmethod
@@ -81,6 +63,31 @@ class RetryManager:
         return int(params[0]), int(params[1]), float(params[2])
 
     @staticmethod
+    def _is_retriable_exception(exception: Exception) -> bool:
+        """Détermine si une exception est retriable basé sur son type ou nom."""
+        exception_name = type(exception).__name__
+        module_name = type(exception).__module__
+        
+        # Exceptions Binance
+        if module_name == 'binance.exceptions' and exception_name == 'BinanceAPIException':
+            return True
+        
+        # Exceptions requests
+        if module_name == 'requests.exceptions':
+            if exception_name in ['RequestException', 'ConnectionError', 'Timeout', 'HTTPError']:
+                return True
+        
+        # Exceptions réseau standards
+        if exception_name in ['ConnectionError', 'TimeoutError', 'OSError']:
+            return True
+            
+        # Exceptions urllib (utilisé par requests)
+        if 'urllib' in module_name and exception_name in ['URLError', 'HTTPError']:
+            return True
+            
+        return False
+
+    @staticmethod
     def with_retry(max_retries: int = 5, delay: int = 10, backoff_multiplier: float = 1.0):
         """Décorateur générique de retry."""
         def decorator(func: Callable[..., Any]):
@@ -92,22 +99,21 @@ class RetryManager:
                 for attempt in range(max_retries + 1):  # +1 = tentative initiale
                     try:
                         return func(*args, **kwargs)
-                    except (BinanceAPIException,
-                            requests_exceptions.RequestException,
-                            ConnectionError, TimeoutError) as e:  # type: ignore[name-defined]
-                        last_exception = e
-                        if attempt < max_retries:
-                            print(f"⚠️ Tentative {attempt + 1}/{max_retries + 1} échouée: {e}")
-                            print(f"🔄 Retry dans {current_delay:.1f}s...")
-                            time.sleep(current_delay)
-                            current_delay *= backoff_multiplier
-                        else:
-                            print(f"❌ Toutes les tentatives échouées après {max_retries + 1} essais")
-                            raise last_exception
                     except Exception as e:
-                        # Non-retriable
-                        print(f"❌ Erreur non-retriable: {e}")
-                        raise e
+                        if RetryManager._is_retriable_exception(e):
+                            last_exception = e
+                            if attempt < max_retries:
+                                print(f"⚠️ Tentative {attempt + 1}/{max_retries + 1} échouée: {e}")
+                                print(f"🔄 Retry dans {current_delay:.1f}s...")
+                                time.sleep(current_delay)
+                                current_delay *= backoff_multiplier
+                            else:
+                                print(f"❌ Toutes les tentatives échouées après {max_retries + 1} essais")
+                                raise last_exception
+                        else:
+                            # Exception non-retriable
+                            print(f"❌ Erreur non-retriable: {e}")
+                            raise e
 
                 # Sécurité (ne devrait pas arriver)
                 if last_exception is not None:
@@ -137,24 +143,21 @@ class RetryManager:
         for attempt in range(retries + 1):
             try:
                 return func(*args, **kwargs)
-            except (BinanceAPIException,
-                    requests_exceptions.RequestException,
-                    ConnectionError, TimeoutError) as e:  # type: ignore[name-defined]
-                last_exception = e
-                if attempt < retries:
-                    print(f"⚠️ Tentative {attempt + 1}/{retries + 1} échouée: {e}")
-                    print(f"🔄 Retry dans {current_delay:.1f}s...")
-                    time.sleep(current_delay)
-                    current_delay *= bo
-                else:
-                    print("❌ Toutes les tentatives échouées")
-                    raise last_exception
             except Exception as e:
-                # Non-retriable
-                raise e
+                if RetryManager._is_retriable_exception(e):
+                    last_exception = e
+                    if attempt < retries:
+                        print(f"⚠️ Tentative {attempt + 1}/{retries + 1} échouée: {e}")
+                        print(f"🔄 Retry dans {current_delay:.1f}s...")
+                        time.sleep(current_delay)
+                        current_delay *= bo
+                    else:
+                        print("❌ Toutes les tentatives échouées")
+                        raise last_exception
+                else:
+                    # Exception non-retriable
+                    raise e
 
         if last_exception is not None:
             raise last_exception
         raise RuntimeError("Erreur inattendue: aucune exception capturée")
-
-

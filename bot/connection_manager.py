@@ -358,3 +358,33 @@ class ConnectionManager:
         if self.reconnection_thread and self.reconnection_thread.is_alive():
             self.reconnection_thread.join(timeout=5)
         print("🛑 Processus de reconnexion arrêté")
+
+    def _health_check_loop(self):
+        """Boucle de vérification de la santé de la connexion"""
+        print("🔍 Démarrage health check WebSocket...")
+        
+        while self.bot.running:
+            try:
+                time.sleep(self.health_check_interval)
+                
+                if not self.bot.running:
+                    break
+                
+                # Vérifier si on a reçu des données récemment
+                if self.last_websocket_data:
+                    time_since_last_data = time.time() - self.last_websocket_data
+                    
+                    # Si pas de données depuis 2x l'intervalle de health check
+                    if time_since_last_data > (self.health_check_interval * 2):
+                        print(f"⚠️ Aucune donnée WebSocket depuis {time_since_last_data:.0f}s")
+                        
+                        # Vérifier si le WebSocket semble toujours vivant
+                        if self.bot.ws_handler and not self.bot.ws_handler.is_healthy():
+                            print("💥 WebSocket semble mort - Force reconnexion")
+                            self.force_reconnection()
+                
+            except Exception as e:
+                print(f"⚠️ Erreur health check: {e}")
+                time.sleep(30)  # Attendre avant retry
+        
+        print("🔍 Health check arrêté")

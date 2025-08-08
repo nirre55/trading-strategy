@@ -38,15 +38,7 @@ except ImportError as e:
 
 class HeikinAshiRSIBot:
     def __init__(self):
-        # Harmoniser le symbole entre config.SYMBOL et ASSET_CONFIG['SYMBOL'] si nécessaire
-        try:
-            if hasattr(config, 'ASSET_CONFIG') and 'SYMBOL' in config.ASSET_CONFIG:
-                if config.SYMBOL != config.ASSET_CONFIG['SYMBOL']:
-                    print(f"⚠️ Incohérence SYMBOL: config.SYMBOL={config.SYMBOL} != ASSET_CONFIG['SYMBOL']={config.ASSET_CONFIG['SYMBOL']} - Utilisation de ASSET_CONFIG['SYMBOL']")
-                    config.SYMBOL = config.ASSET_CONFIG['SYMBOL']
-        except Exception:
-            pass
-
+        # Configuration centralisée - plus besoin de vérifier config.SYMBOL
         self.binance_client = BinanceClient()
         self.df = pd.DataFrame()
         self.ha_df = pd.DataFrame()
@@ -96,7 +88,7 @@ class HeikinAshiRSIBot:
         
         # Log de démarrage
         trading_logger.system_status(f"Bot démarré - Symbole: {config.ASSET_CONFIG['SYMBOL']} - Timeframe: {config.ASSET_CONFIG['TIMEFRAME']}")
-    
+
     def _display_double_ha_config(self):
         """Affiche la configuration du filtre Double Heikin Ashi"""
         filter_config = config.DOUBLE_HEIKIN_ASHI_FILTER
@@ -875,8 +867,9 @@ class HeikinAshiRSIBot:
                 import threading
                 health_thread = threading.Thread(target=self.connection_manager._health_check_loop, daemon=True)
                 health_thread.start()
-            except Exception:
-                pass
+                print(f"{config.COLORS['cyan']}🔍 Health check WebSocket démarré{config.COLORS['reset']}")
+            except Exception as e:
+                print(f"⚠️ Erreur démarrage health check: {e}")
         
         # Boucle principale
         try:

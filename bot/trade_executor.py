@@ -9,6 +9,7 @@ from binance.client import Client
 from binance.exceptions import BinanceAPIException
 import config
 from position_manager import PositionManager, load_api_credentials_from_env
+from retry_manager import RetryManager
 from trading_logger import trading_logger
 
 class TradeExecutor:
@@ -44,7 +45,12 @@ class TradeExecutor:
     def get_current_price(self):
         """Récupère le prix market actuel du symbole"""
         try:
-            ticker = self.client.futures_symbol_ticker(symbol=config.ASSET_CONFIG['SYMBOL'])
+            # Retry configuré pour récupération de prix
+            @RetryManager.with_configured_retry('PRICE')
+            def _get_ticker():
+                return self.client.futures_symbol_ticker(symbol=config.ASSET_CONFIG['SYMBOL'])
+
+            ticker = _get_ticker()
             price = float(ticker['price'])
             print(f"💰 Prix actuel {config.ASSET_CONFIG['SYMBOL']}: {price}")
             return price
@@ -174,10 +180,14 @@ class TradeExecutor:
             start_time = time.time()
             
             while time.time() - start_time < timeout:
-                order_status = self.client.futures_get_order(
-                    symbol=config.ASSET_CONFIG['SYMBOL'],
-                    orderId=order_id
-                )
+                # Retry léger sur status order
+                @RetryManager.with_configured_retry('ORDER_STATUS')
+                def _get_order():
+                    return self.client.futures_get_order(
+                        symbol=config.ASSET_CONFIG['SYMBOL'],
+                        orderId=order_id
+                    )
+                order_status = _get_order()
                 
                 if order_status['status'] == 'FILLED':
                     executed_price = float(order_status['avgPrice'])
@@ -208,10 +218,13 @@ class TradeExecutor:
             
             # Annuler l'ordre en cas de timeout
             try:
-                self.client.futures_cancel_order(
-                    symbol=config.ASSET_CONFIG['SYMBOL'],
-                    orderId=order_id
-                )
+                @RetryManager.with_configured_retry('ORDER_CANCELLATION')
+                def _cancel():
+                    return self.client.futures_cancel_order(
+                        symbol=config.ASSET_CONFIG['SYMBOL'],
+                        orderId=order_id
+                    )
+                _cancel()
                 print(f"🚫 Ordre {order_id} annulé (timeout)")
             except:
                 pass  # Ignore si déjà exécuté
@@ -260,12 +273,15 @@ class TradeExecutor:
             print(f"📊 Prix actuel pour fallback: {current_price}")
             
             # Placer ordre MARKET
-            order = self.client.futures_create_order(
-                symbol=config.ASSET_CONFIG['SYMBOL'],
-                side=side,
-                type='MARKET',
-                quantity=quantity
-            )
+            @RetryManager.with_configured_retry('ORDER_PLACEMENT')
+            def _place_market():
+                return self.client.futures_create_order(
+                    symbol=config.ASSET_CONFIG['SYMBOL'],
+                    side=side,
+                    type='MARKET',
+                    quantity=quantity
+                )
+            order = _place_market()
             
             order_id = order['orderId']
             print(f"⚡ Ordre MARKET fallback placé: {order_id}")
@@ -276,9 +292,21 @@ class TradeExecutor:
             
             if executed_price and executed_quantity:
                 # Calculer slippage par rapport au prix attendu
+                slippage = None
                 if original_order_type == 'LIMIT':
                     slippage = abs(executed_price - current_price) / current_price * 100
                     print(f"📊 Slippage fallback: {slippage:.3f}%")
+                
+                # Respecter le seuil de slippage si défini
+                max_slippage = config.TRADING_CONFIG.get('FALLBACK_MAX_SLIPPAGE')
+                if slippage is not None and max_slippage is not None and slippage > float(max_slippage):
+                    print(f"🚫 Slippage {slippage:.3f}% > seuil {max_slippage:.3f}% - annulation du fallback")
+                    try:
+                        # Fermer immédiatement la position ouverte par erreur
+                        self._emergency_close_position('BUY' if side == 'SELL' else 'SELL', executed_quantity)
+                    except Exception:
+                        pass
+                    return None
                 
                 print(f"✅ Fallback MARKET exécuté avec succès:")
                 print(f"   Prix d'exécution: {executed_price}")
@@ -308,10 +336,13 @@ class TradeExecutor:
     def _get_executed_order_details(self, order_id):
         """Récupère les détails d'un ordre exécuté"""
         try:
-            order_details = self.client.futures_get_order(
-                symbol=config.ASSET_CONFIG['SYMBOL'],
-                orderId=order_id
-            )
+            @RetryManager.with_configured_retry('ORDER_STATUS')
+            def _get_order_details():
+                return self.client.futures_get_order(
+                    symbol=config.ASSET_CONFIG['SYMBOL'],
+                    orderId=order_id
+                )
+            order_details = _get_order_details()
             
             executed_price = float(order_details['avgPrice'])
             executed_quantity = float(order_details['executedQty'])
@@ -339,13 +370,16 @@ class TradeExecutor:
         try:
             print(f"🛡️ Placement Stop Loss: {side} {quantity} @ {stop_price}")
             
-            order = self.client.futures_create_order(
-                symbol=config.ASSET_CONFIG['SYMBOL'],
-                side=side,
-                type='STOP_MARKET',
-                quantity=quantity,
-                stopPrice=str(stop_price)
-            )
+            @RetryManager.with_configured_retry('ORDER_PLACEMENT')
+            def _place_sl():
+                return self.client.futures_create_order(
+                    symbol=config.ASSET_CONFIG['SYMBOL'],
+                    side=side,
+                    type='STOP_MARKET',
+                    quantity=quantity,
+                    stopPrice=str(stop_price)
+                )
+            order = _place_sl()
             
             order_id = order['orderId']
             print(f"✅ Stop Loss placé: {order_id}")
@@ -381,14 +415,17 @@ class TradeExecutor:
         try:
             print(f"🎯 Placement Take Profit: {side} {quantity} @ {limit_price}")
             
-            order = self.client.futures_create_order(
-                symbol=config.ASSET_CONFIG['SYMBOL'],
-                side=side,
-                type='LIMIT',
-                timeInForce='GTC',
-                quantity=quantity,
-                price=str(limit_price)
-            )
+            @RetryManager.with_configured_retry('ORDER_PLACEMENT')
+            def _place_tp():
+                return self.client.futures_create_order(
+                    symbol=config.ASSET_CONFIG['SYMBOL'],
+                    side=side,
+                    type='LIMIT',
+                    timeInForce='GTC',
+                    quantity=quantity,
+                    price=str(limit_price)
+                )
+            order = _place_tp()
             
             order_id = order['orderId']
             print(f"✅ Take Profit placé: {order_id}")
@@ -411,10 +448,13 @@ class TradeExecutor:
     def cancel_order(self, order_id):
         """Annule un ordre spécifique"""
         try:
-            self.client.futures_cancel_order(
-                symbol=config.ASSET_CONFIG['SYMBOL'],
-                orderId=order_id
-            )
+            @RetryManager.with_configured_retry('ORDER_CANCELLATION')
+            def _cancel_any():
+                return self.client.futures_cancel_order(
+                    symbol=config.ASSET_CONFIG['SYMBOL'],
+                    orderId=order_id
+                )
+            _cancel_any()
             print(f"🚫 Ordre {order_id} annulé")
             return True
             
@@ -643,12 +683,15 @@ class TradeExecutor:
             emergency_side = 'SELL' if original_side == 'BUY' else 'BUY'
             print(f"🚨 Fermeture d'urgence: {emergency_side} {quantity}")
             
-            self.client.futures_create_order(
-                symbol=config.ASSET_CONFIG['SYMBOL'],
-                side=emergency_side,
-                type='MARKET',
-                quantity=quantity
-            )
+            @RetryManager.with_configured_retry('ORDER_PLACEMENT')
+            def _emergency():
+                return self.client.futures_create_order(
+                    symbol=config.ASSET_CONFIG['SYMBOL'],
+                    side=emergency_side,
+                    type='MARKET',
+                    quantity=quantity
+                )
+            _emergency()
             print("✅ Position fermée en urgence")
             
         except Exception as e:

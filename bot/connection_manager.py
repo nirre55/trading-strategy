@@ -111,8 +111,8 @@ class ConnectionManager:
                 # Créer nouveau WebSocket
                 from websocket_handler import BinanceWebSocketHandler
                 self.bot.ws_handler = BinanceWebSocketHandler(
-                    config.SYMBOL,
-                    config.TIMEFRAME,
+                    config.ASSET_CONFIG['SYMBOL'],
+                    config.ASSET_CONFIG['TIMEFRAME'],
                     self.bot.on_kline_update
                 )
                 
@@ -181,7 +181,10 @@ class ConnectionManager:
                 self.handle_existing_positions(symbol_positions)
             
             if len(local_trades) > 0 and len(symbol_positions) == 0:
-                self.cleanup_ghost_trades(local_trades)
+                if config.CONNECTION_CONFIG.get('AUTO_CLEANUP_GHOST_TRADES', True):
+                    self.cleanup_ghost_trades(local_trades)
+                else:
+                    print("ℹ️ Nettoyage trades fantômes désactivé par configuration")
             
             if len(symbol_positions) == 0 and len(local_trades) == 0:
                 print("✅ Aucune position détectée - État clean")
@@ -278,9 +281,10 @@ class ConnectionManager:
     
     def enter_safe_mode(self, duration=300):
         """Active le mode sécurisé temporaire"""
-        self.safe_mode_until = time.time() + duration
-        print(f"🛡️ MODE SÉCURISÉ activé pendant {duration//60} minutes")
-        trading_logger.system_status(f"Mode sécurisé activé pendant {duration}s")
+        cfg_duration = config.CONNECTION_CONFIG.get('SAFE_MODE_DURATION', duration)
+        self.safe_mode_until = time.time() + int(cfg_duration)
+        print(f"🛡️ MODE SÉCURISÉ activé pendant {int(cfg_duration)//60} minutes")
+        trading_logger.system_status(f"Mode sécurisé activé pendant {int(cfg_duration)}s")
     
     def is_safe_mode_active(self):
         """Vérifie si le mode sécurisé est actif"""
@@ -299,7 +303,7 @@ class ConnectionManager:
             
             max_positions = config.TRADING_CONFIG.get('MAX_POSITIONS', 1)
             
-            if len(symbol_positions) >= max_positions:
+            if len(symbol_positions) >= max_positions and config.CONNECTION_CONFIG.get('BLOCK_TRADES_ON_POSITION', True):
                 if self.is_safe_mode_active():
                     print(f"🛡️ SAFE MODE: Trade bloqué - Position détectée ({len(symbol_positions)}/{max_positions})")
                 else:

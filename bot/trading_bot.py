@@ -38,6 +38,15 @@ except ImportError as e:
 
 class HeikinAshiRSIBot:
     def __init__(self):
+        # Harmoniser le symbole entre config.SYMBOL et ASSET_CONFIG['SYMBOL'] si nécessaire
+        try:
+            if hasattr(config, 'ASSET_CONFIG') and 'SYMBOL' in config.ASSET_CONFIG:
+                if config.SYMBOL != config.ASSET_CONFIG['SYMBOL']:
+                    print(f"⚠️ Incohérence SYMBOL: config.SYMBOL={config.SYMBOL} != ASSET_CONFIG['SYMBOL']={config.ASSET_CONFIG['SYMBOL']} - Utilisation de ASSET_CONFIG['SYMBOL']")
+                    config.SYMBOL = config.ASSET_CONFIG['SYMBOL']
+        except Exception:
+            pass
+
         self.binance_client = BinanceClient()
         self.df = pd.DataFrame()
         self.ha_df = pd.DataFrame()
@@ -86,7 +95,7 @@ class HeikinAshiRSIBot:
         self._display_double_ha_config()
         
         # Log de démarrage
-        trading_logger.system_status(f"Bot démarré - Symbole: {config.SYMBOL} - Timeframe: {config.TIMEFRAME}")
+        trading_logger.system_status(f"Bot démarré - Symbole: {config.ASSET_CONFIG['SYMBOL']} - Timeframe: {config.ASSET_CONFIG['TIMEFRAME']}")
     
     def _display_double_ha_config(self):
         """Affiche la configuration du filtre Double Heikin Ashi"""
@@ -124,12 +133,12 @@ class HeikinAshiRSIBot:
     
     def initialize_historical_data(self):
         """Initialise avec les données historiques"""
-        print(f"Récupération des données historiques pour {config.SYMBOL} {config.TIMEFRAME}...")
+        print(f"Récupération des données historiques pour {config.ASSET_CONFIG['SYMBOL']} {config.ASSET_CONFIG['TIMEFRAME']}...")
         trading_logger.system_status(f"Récupération données historiques: {config.INITIAL_KLINES_LIMIT} bougies")
         
         historical_data = self.binance_client.get_historical_klines(
-            config.SYMBOL, 
-            config.TIMEFRAME, 
+            config.ASSET_CONFIG['SYMBOL'], 
+            config.ASSET_CONFIG['TIMEFRAME'], 
             config.INITIAL_KLINES_LIMIT
         )
         
@@ -419,10 +428,10 @@ class HeikinAshiRSIBot:
             else:
                 timestamp = datetime.now().strftime("%H:%M:%S")
                 pending_status = self.trading_signals.get_pending_status()
-                print(f"[{timestamp}] {config.SYMBOL} - {pending_status}")
+                print(f"[{timestamp}] {config.ASSET_CONFIG['SYMBOL']} - {pending_status}")
         elif config.LOG_SETTINGS['SHOW_SIGNAL_ANALYSIS']:
             timestamp = datetime.now().strftime("%H:%M:%S")
-            print(f"[{timestamp}] {config.SYMBOL} - Aucun signal | LONG: {signals_analysis['count']['LONG']} | SHORT: {signals_analysis['count']['SHORT']}")
+            print(f"[{timestamp}] {config.ASSET_CONFIG['SYMBOL']} - Aucun signal | LONG: {signals_analysis['count']['LONG']} | SHORT: {signals_analysis['count']['SHORT']}")
     
     def _display_current_positions(self):
         """Affiche les positions actuelles"""
@@ -563,7 +572,7 @@ class HeikinAshiRSIBot:
         trading_mode = f" {config.COLORS['magenta']}[AUTO]{config.COLORS['reset']}" if self.trading_enabled else f" {config.COLORS['white']}[ANALYSE]{config.COLORS['reset']}"
         
         print(f"\n{config.COLORS['cyan']}{config.DISPLAY_SYMBOLS['SEPARATOR']}{config.COLORS['reset']}")
-        print(f"{config.COLORS['bold']}[{timestamp}] {config.SYMBOL} - {config.TIMEFRAME}{trading_mode}{title_signal}{config.COLORS['reset']}")
+        print(f"{config.COLORS['bold']}[{timestamp}] {config.ASSET_CONFIG['SYMBOL']} - {config.ASSET_CONFIG['TIMEFRAME']}{trading_mode}{title_signal}{config.COLORS['reset']}")
         print(f"{config.COLORS['cyan']}{config.DISPLAY_SYMBOLS['SEPARATOR']}{config.COLORS['reset']}")
         
         # Afficher les données Heikin Ashi selon configuration
@@ -779,8 +788,8 @@ class HeikinAshiRSIBot:
         print(f"{config.COLORS['reset']}")
         
         print(f"Configuration:")
-        print(f"  Symbole: {config.SYMBOL}")
-        print(f"  Timeframe: {config.TIMEFRAME}")
+        print(f"  Symbole: {config.ASSET_CONFIG['SYMBOL']}")
+        print(f"  Timeframe: {config.ASSET_CONFIG['TIMEFRAME']}")
         print(f"  Périodes RSI: {config.RSI_PERIODS}")
         print(f"  Données historiques: {config.INITIAL_KLINES_LIMIT} bougies")
         
@@ -817,8 +826,8 @@ class HeikinAshiRSIBot:
         # Démarrer le WebSocket
         print(f"\n{config.COLORS['yellow']}Démarrage du WebSocket...{config.COLORS['reset']}")
         self.ws_handler = BinanceWebSocketHandler(
-            config.SYMBOL, 
-            config.TIMEFRAME, 
+            config.ASSET_CONFIG['SYMBOL'], 
+            config.ASSET_CONFIG['TIMEFRAME'], 
             self.on_kline_update
         )
         
@@ -859,9 +868,27 @@ class HeikinAshiRSIBot:
             print(f"\n{config.COLORS['cyan']}Vérification synchronisation initiale...{config.COLORS['reset']}")
             self.connection_manager.sync_state_after_reconnection()
         
+        # Démarrer un health-check si configuré
+        if self.connection_manager is not None:
+            try:
+                # Lancer en tâche de fond
+                import threading
+                health_thread = threading.Thread(target=self.connection_manager._health_check_loop, daemon=True)
+                health_thread.start()
+            except Exception:
+                pass
+        
         # Boucle principale
         try:
             while self.running:
+                # Arrêt d'urgence configurable
+                if config.SAFETY_CONFIG.get('EMERGENCY_STOP', False):
+                    print(f"{config.COLORS['red']}🛑 EMERGENCY_STOP activé - Fermeture positions et arrêt{config.COLORS['reset']}")
+                    try:
+                        if self.trade_executor is not None:
+                            self.trade_executor.close_all_positions()
+                    finally:
+                        self.signal_handler(None, None)
                 # NOUVEAU: La boucle continue même si WebSocket déconnecté
                 time.sleep(1)
         except KeyboardInterrupt:

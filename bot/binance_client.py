@@ -6,6 +6,7 @@ import pandas as pd
 from datetime import datetime
 import config
 from trading_logger import trading_logger
+from retry_manager import RetryManager
 
 class BinanceClient:
     def __init__(self):
@@ -21,7 +22,11 @@ class BinanceClient:
         }
         
         try:
-            response = requests.get(endpoint, params=params)
+            @RetryManager.with_configured_retry('PRICE')
+            def _get():
+                return requests.get(endpoint, params=params)
+
+            response = _get()
             response.raise_for_status()
             data = response.json()
             

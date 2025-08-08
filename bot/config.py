@@ -2,9 +2,12 @@
 Configuration du bot de trading Binance Futures
 """
 
-# Configuration du symbole et timeframe
-SYMBOL = "BTCUSDC"
-TIMEFRAME = "5m"  # 1m, 3m, 5m, 15m, 30m, 1h, 2h, 4h, 6h, 8h, 12h, 1d, 3d, 1w, 1M
+# Configuration Asset & Symbol (centralisé)
+ASSET_CONFIG = {
+    'BALANCE_ASSET': 'USDC',            # Asset pour balance (USDT/USDC/BUSD)
+    'SYMBOL': 'BTCUSDC',                # Symbole trading
+    'TIMEFRAME': '5m',                  # 1m,3m,5m,15m,30m,1h,2h,4h,6h,8h,12h,1d,3d,1w,1M
+}
 
 # Configuration des périodes RSI
 RSI_PERIODS = [5, 14, 21]
@@ -69,17 +72,8 @@ SIGNAL_SETTINGS = {
     'SHOW_NEUTRAL_ANALYSIS': False,        # Afficher l'analyse même quand pas de signal
     'SHOW_MINIMAL_INFO': True,            # Afficher seulement couleur HA + RSI à chaque bougie
     
-    # Alertes sonores (pour extension future)
-    'SOUND_ALERTS': False,                  # Alertes sonores pour les signaux
-    'ALERT_LONG_SOUND': 'beep_long.wav',   # Fichier son pour signal LONG
-    'ALERT_SHORT_SOUND': 'beep_short.wav', # Fichier son pour signal SHORT
 }
 
-# Configuration Asset & Symbol
-ASSET_CONFIG = {
-    'BALANCE_ASSET': 'USDC',                # Asset pour balance (USDT/USDC/BUSD)
-    'SYMBOL': 'BTCUSDC',                    # Symbole trading
-}
 
 # Configuration Trading avancée
 TRADING_CONFIG = {
@@ -107,20 +101,12 @@ TRADING_CONFIG = {
     'FALLBACK_MAX_SLIPPAGE': 0.03,         # Slippage maximum accepté pour fallback (%)
 }
 
-# Types d'ordres Binance
-ORDER_TYPES = {
-    'ENTRY_MARKET': 'MARKET',
-    'ENTRY_LIMIT': 'LIMIT',
-    'STOP_LOSS': 'STOP_MARKET',
-    'TAKE_PROFIT': 'LIMIT',
-}
 
 # Configuration sécurité supplémentaire
 SAFETY_CONFIG = {
     'MAX_DAILY_TRADES': 1000,                 # Limite quotidienne de trades
     'CONFIRM_BEFORE_TRADE': False,           # Demander confirmation avant trade
     'EMERGENCY_STOP': False,                # Arrêt d'urgence (fermer tout)
-    'LOG_ALL_TRADES': True,                 # Logger tous les trades
     'LOG_TO_CONSOLE': True,                 # Afficher logs dans console aussi
 }
 
@@ -134,19 +120,34 @@ CONNECTION_CONFIG = {
     
     'SYNC_AFTER_RECONNECTION': True,        # Synchronisation obligatoire après reconnexion
     'BLOCK_TRADES_ON_POSITION': True,       # Bloquer nouveaux trades si position détectée
-    'SYNC_VALIDATION_TIMEOUT': 30,          # Timeout pour validation synchronisation
     'AUTO_CLEANUP_GHOST_TRADES': True,      # Nettoyage automatique trades fantômes
     'SAFE_MODE_DURATION': 300,              # Durée mode sécurisé après reconnexion (5 min)
 }
 
-# Messages et notifications
-TRADING_MESSAGES = {
-    'TRADE_OPENED': '🚀 TRADE OUVERT',
-    'STOP_LOSS_HIT': '🛡️ STOP LOSS DÉCLENCHÉ',
-    'TAKE_PROFIT_HIT': '🎯 TAKE PROFIT ATTEINT',
-    'TRADE_CLOSED': '✅ TRADE FERMÉ',
-    'ERROR_TRADE': '❌ ERREUR TRADE',
+# Configuration du système de retry API
+RETRY_CONFIG = {
+    # Défauts
+    'DEFAULT_MAX_RETRIES': 5,
+    'DEFAULT_DELAY': 10,                 # secondes
+    'DEFAULT_BACKOFF_MULTIPLIER': 1.2,
+
+    # Spécifiques par type d'opération
+    'VALIDATION_RETRIES': 5,
+    'VALIDATION_DELAY': 10,
+
+    'PRICE_FETCH_RETRIES': 5,            # Récupération prix ticker
+    'BALANCE_FETCH_RETRIES': 5,          # Récupération balance
+    'POSITION_FETCH_RETRIES': 5,         # Récupération positions
+
+    'ORDER_PLACEMENT_RETRIES': 3,        # Placement d'ordres
+    'ORDER_STATUS_RETRIES': 3,           # Lecture statut ordre
+    'ORDER_CANCELLATION_RETRIES': 3,     # Annulation d'ordres
+
+    # Délais spécifiques
+    'ORDER_DELAY': 5,                    # Délai entre tentatives de placement d'ordre
+    'STATUS_CHECK_DELAY': 2,             # Délai entre lectures de statut
 }
+
 
 # Emojis et symboles pour l'affichage
 DISPLAY_SYMBOLS = {

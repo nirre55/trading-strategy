@@ -6,6 +6,7 @@ from binance.client import Client
 from binance.exceptions import BinanceAPIException
 import pandas as pd
 import config
+from retry_manager import RetryManager
 from trading_logger import trading_logger
 
 def load_api_credentials_from_env(key_name, filename=".env"):
@@ -46,6 +47,7 @@ class PositionManager:
             trading_logger.error_occurred("INIT_POSITION_MANAGER", str(e))
             raise
     
+    @RetryManager.with_configured_retry('VALIDATION')
     def _load_symbol_info(self):
         """Charge les informations du symbole (précision, limites)"""
         try:
@@ -99,6 +101,7 @@ class PositionManager:
             trading_logger.error_occurred("LOAD_SYMBOL_INFO", str(e))
             raise
     
+    @RetryManager.with_configured_retry('BALANCE')
     def get_account_balance(self, asset="USDT"):
         """Récupère la balance du compte pour l'asset spécifié"""
         try:
@@ -289,6 +292,7 @@ class PositionManager:
             trading_logger.error_occurred("CALCUL_POSITION", str(e))
             return 0
     
+    @RetryManager.with_configured_retry('POSITION')
     def get_current_positions(self):
         """Récupère les positions ouvertes"""
         try:

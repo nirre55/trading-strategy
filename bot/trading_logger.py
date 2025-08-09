@@ -16,7 +16,7 @@ class TradingLogger:
         
         # Nom du fichier de log avec date
         today = datetime.now().strftime("%Y%m%d")
-        log_filename = f"trading_{today}.log"
+        log_filename = f"trading_{config.ASSET_CONFIG['SYMBOL']}_{config.ASSET_CONFIG['TIMEFRAME']}_{today}.log"
         log_path = os.path.join(log_dir, log_filename)
         
         # Configuration du logger principal
@@ -53,7 +53,7 @@ class TradingLogger:
         
         if not self.trade_logger.handlers:
             # Fichier séparé pour les trades
-            trade_log_filename = f"trades_{today}.log"
+            trade_log_filename = f"trades_{config.ASSET_CONFIG['SYMBOL']}_{config.ASSET_CONFIG['TIMEFRAME']}_{today}.log"
             trade_log_path = os.path.join(log_dir, trade_log_filename)
             
             trade_handler = logging.FileHandler(trade_log_path, encoding='utf-8')

@@ -1,80 +1,121 @@
 import os
 import sys
+import time
+import argparse
 import subprocess
-import shutil
 from datetime import datetime
 
-def find_bot_dirs(base_dir):
-    # On ne prend que les dossiers qui commencent par "bot_"
-    return [
-        d for d in os.listdir(base_dir)
-        if d.startswith("bot_") and os.path.isdir(os.path.join(base_dir, d))
-    ]
+def find_bot_dirs(base_dir, only=None):
+    dirs = [d for d in os.listdir(base_dir)
+            if d.startswith("bot_") and os.path.isdir(os.path.join(base_dir, d))]
+    dirs.sort()
+    if only:
+        wanted = set(only)
+        dirs = [d for d in dirs if d in wanted]
+    return dirs
 
-def launch_with_windows_terminal(bot_dir):
-    """
-    Lance le bot dans une nouvelle fenêtre ou onglet Windows Terminal (si installé).
-    """
-    wt = shutil.which("wt")  # Windows Terminal
-    if not wt:
-        return False
+def pick_python(bot_dir):
+    # Utilise le venv local si présent, sinon l'interpréteur courant
+    for v in (".venv", "venv", "env"):
+        exe = os.path.join(bot_dir, v, "Scripts", "python.exe")
+        if os.path.isfile(exe):
+            return exe
+    return sys.executable
 
-    # -w 0 : utilise la fenêtre existante si ouverte, sinon en crée une
-    # nt : new tab ;  -d . : set working dir
-    cmd = [
-        wt, "-w", "0", "nt", "-d", ".", sys.executable, "-u", "main.py"
-    ]
-    subprocess.Popen(cmd, cwd=bot_dir, close_fds=True)
-    return True
+def make_console_bat(bot_dir, python_exe):
+    """Crée un .bat qui lance main.py, montre la sortie et reste ouvert."""
+    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+    bat_path = os.path.join(bot_dir, f"_run_main_{ts}.bat")
+    content = f"""@echo off
+setlocal
+cd /d "%~dp0"
+title {os.path.basename(bot_dir)}
+echo [INFO] Dossier: %CD%
+echo [INFO] Python: {python_exe}
+echo [INFO] Lancement: "{python_exe}" -u main.py
+echo.
+"{python_exe}" -u main.py
+echo.
+echo [TERMINE] %DATE% %TIME%
+pause
+"""
+    with open(bat_path, "w", encoding="utf-8") as f:
+        f.write(content)
+    return bat_path
 
-def launch_with_cmd_start(bot_dir, title):
-    """
-    Lance le bot dans une NOUVELLE fenêtre de console via 'start'.
-    /k garde la fenêtre ouverte pour voir la sortie en direct.
-    """
-    # Optionnel: logs sur disque en plus d'afficher dans la fenêtre
+def launch_console(bot_dir):
+    """Lance le .bat dans une nouvelle fenêtre via 'start' (fiable)."""
+    python_exe = pick_python(bot_dir)
+    bat = make_console_bat(bot_dir, python_exe)
+    title = os.path.basename(bot_dir)
+
+    # 'start' est une commande interne de cmd → shell=True requis
+    # Le premier argument entre guillemets après start est le titre
+    cmd = f'start "{title}" "{bat}"'
+    subprocess.Popen(cmd, cwd=bot_dir, shell=True, close_fds=True)
+
+def launch_background(bot_dir):
+    """Option arrière-plan (sans fenêtre), avec logs."""
+    python_exe = pick_python(bot_dir)
     log_dir = os.path.join(bot_dir, "logs")
     os.makedirs(log_dir, exist_ok=True)
     ts = datetime.now().strftime("%Y%m%d-%H%M%S")
     out_log = os.path.join(log_dir, f"stdout-{ts}.log")
     err_log = os.path.join(log_dir, f"stderr-{ts}.log")
+    stdout_f = open(out_log, "ab", buffering=0)
+    stderr_f = open(err_log, "ab", buffering=0)
 
-    python_exe = sys.executable
-
-    # Commande exécutée dans la fenêtre: python -u main.py >>stdout 2>>stderr
-    inner = f'"{python_exe}" -u main.py >> "{out_log}" 2>> "{err_log}"'
-
-    # start "<title>" cmd /k "<commande>"
-    # shell=True pour laisser 'start' être interprété par cmd.exe
-    full_cmd = f'start "{title}" cmd /k {inner}'
-    subprocess.Popen(full_cmd, cwd=bot_dir, shell=True, close_fds=True)
+    subprocess.Popen(
+        [python_exe, "-u", "main.py"],
+        cwd=bot_dir,
+        stdin=subprocess.DEVNULL,
+        stdout=stdout_f,
+        stderr=stderr_f,
+        creationflags=subprocess.CREATE_NO_WINDOW,
+        close_fds=True,
+    )
 
 def main():
+    parser = argparse.ArgumentParser(description="Lancer tous les bot_*/main.py (Windows).")
+    parser.add_argument("--mode", choices=["console", "background"], default="console",
+                        help="console = fenêtre par bot (live), background = sans fenêtre (logs).")
+    parser.add_argument("--delay", type=float, default=0.4,
+                        help="Pause entre lancements (éviter collisions).")
+    parser.add_argument("--only", nargs="*", default=None,
+                        help="Ne lancer que certains dossiers (ex: --only bot_final bot_abc).")
+    args = parser.parse_args()
+
+    if os.name != "nt":
+        print("Ce script est prévu pour Windows.")
+        sys.exit(1)
+
     base_dir = os.path.dirname(os.path.abspath(__file__))
-    bot_dirs = find_bot_dirs(base_dir)
+    bot_dirs = find_bot_dirs(base_dir, only=args.only)
 
     if not bot_dirs:
         print("Aucun dossier 'bot_*' trouvé.")
         return
 
-    print("Ouverture d'une console par bot (Windows)...")
+    print("Bots détectés:", bot_dirs)
+
     for d in bot_dirs:
         bot_path = os.path.join(base_dir, d)
-        main_py = os.path.join(bot_path, "main.py")
-        if not os.path.isfile(main_py):
+        if not os.path.isfile(os.path.join(bot_path, "main.py")):
             print(f" - {d}: aucun main.py, ignoré.")
             continue
 
-        # Essaye Windows Terminal, sinon 'start'
-        if launch_with_windows_terminal(bot_path):
-            print(f" - {d}: lancé dans Windows Terminal.")
-        else:
-            launch_with_cmd_start(bot_path, title=d)
-            print(f" - {d}: lancé dans une nouvelle fenêtre cmd (logs dans {d}\\logs).")
+        try:
+            if args.mode == "console":
+                launch_console(bot_path)
+                print(f" - {d}: fenêtre ouverte (live).")
+            else:
+                launch_background(bot_path)
+                print(f" - {d}: lancé en arrière-plan (logs dans {d}\\logs).")
+            time.sleep(args.delay)
+        except Exception as e:
+            print(f" - {d}: échec du lancement → {e}")
 
-    print("Tout est lancé. Tu peux fermer ce script, les fenêtres des bots restent ouvertes.")
+    print("Terminé.")
 
 if __name__ == "__main__":
-    if os.name != "nt":
-        print("Ce script est prévu pour Windows.")
     main()

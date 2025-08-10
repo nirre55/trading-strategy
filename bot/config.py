@@ -215,8 +215,8 @@ COLORS = {
 # Configuration des niveaux de log
 LOG_SETTINGS = {
     'SHOW_WEBSOCKET_DEBUG': False,         # Messages debug WebSocket
-    'SHOW_DATAFRAME_UPDATES': False,       # Messages mise à jour DataFrame
-    'SHOW_SIGNAL_ANALYSIS': False,         # Messages analyse des signaux
+    'SHOW_DATAFRAME_UPDATES': True,       # Messages mise à jour DataFrame
+    'SHOW_SIGNAL_ANALYSIS': True,         # Messages analyse des signaux
     'SHOW_RSI_CALCULATIONS': False,        # Messages calculs RSI
     'SHOW_HA_CALCULATIONS': False,         # Messages calculs Heikin Ashi
     'SHOW_DOUBLE_HA_CALCULATIONS': False,  # Messages calculs Double Heikin Ashi

@@ -219,5 +219,5 @@ temp/*
 # txt files
 *.txt
 
-live_test/*
-bot_ltc/*
+# ignorer toutes les instances de bot
+bot_*/*

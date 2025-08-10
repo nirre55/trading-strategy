@@ -92,6 +92,10 @@ TRADING_CONFIG = {
     'LIMIT_SPREAD_PERCENT': 0.01,          # 0.01% pour prix limit
     'ORDER_EXECUTION_TIMEOUT': 60,         # Timeout attente exécution (secondes)
     
+    # NOUVEAU: Mode de placement SL/TP
+    'SLTP_PLACEMENT_MODE': 'DELAYED',     # 'IMMEDIATE' ou 'DELAYED'
+    'USE_DELAYED_SLTP': True,             # Utiliser le nouveau système
+
     # Configuration sécurité
     'MIN_BALANCE': 10,                      # Balance minimale
     'MAX_POSITIONS': 1,                     # Nb max positions simultanées
@@ -148,6 +152,40 @@ RETRY_CONFIG = {
     'STATUS_CHECK_DELAY': 2,             # Délai entre lectures de statut
 }
 
+# Configuration SL/TP retardé
+DELAYED_SLTP_CONFIG = {
+    'ENABLED': True,                    # Activer la gestion retardée des SL/TP
+    'PRICE_OFFSET_PERCENT': 0.01,      # Offset à appliquer si prix dépassé (0.01% = 1 pip)
+    'CHECK_INTERVAL_SECONDS': 10,      # Intervalle de vérification en secondes
+    'AUTO_CLEANUP_HOURS': 24,          # Nettoyage automatique après X heures
+    'LOG_DETAILED_CALCULATIONS': True, # Log détaillé des calculs d'ajustement
+    
+    # Comportement avancé
+    'FALLBACK_TO_IMMEDIATE': True,     # Si erreur, revenir au placement immédiat
+    'MAX_OFFSET_PERCENT': 0.05,        # Offset maximum autorisé (sécurité)
+    'MIN_TIME_BEFORE_PLACEMENT': 30,   # Délai minimum avant placement (secondes)
+    
+    # Options de log spécifiques
+    'LOG_CANDLE_CLOSE_EVENTS': True,   # Logger les fermetures de bougies
+    'LOG_PRICE_COMPARISONS': True,     # Logger les comparaisons de prix
+    'LOG_OFFSET_APPLICATIONS': True,   # Logger les applications d'offset
+    
+    # Description du fonctionnement
+    'DESCRIPTION': '''
+    Gestion retardée des SL/TP:
+    1. Trade exécuté immédiatement au signal
+    2. SL/TP calculés mais NOT placés
+    3. Attente fermeture bougie d'entrée
+    4. Vérification prix actuel vs SL/TP originaux
+    5. Application offset 0.01% si prix dépassé
+    6. Placement des ordres SL/TP ajustés
+    
+    Avantages:
+    - Évite les SL/TP touchés immédiatement
+    - Permet d'optimiser les niveaux selon évolution
+    - Réduit les faux signaux sur volatilité
+    '''
+}
 
 # Emojis et symboles pour l'affichage
 DISPLAY_SYMBOLS = {

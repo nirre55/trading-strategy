@@ -46,6 +46,10 @@ class HeikinAshiRSIBot:
         self.running = True
         self.trading_signals = TradingSignals()
         
+        # NOUVEAU: Tracking de la bougie actuelle pour SL/TP retardé
+        self.current_candle_time = None
+        self.last_candle_close_time = None
+        
         # Modules de trading (si disponibles)
         self.position_manager = None
         self.trade_executor = None
@@ -160,10 +164,19 @@ class HeikinAshiRSIBot:
             
         formatted_data = self.binance_client.format_kline_data(kline_data)
         
+        # NOUVEAU: Tracker la bougie actuelle
+        self.current_candle_time = formatted_data['open_time']
+        
         if not formatted_data['is_closed']:
             if config.LOG_SETTINGS['SHOW_DATAFRAME_UPDATES']:
                 print(f"Bougie en cours - pas de mise à jour des calculs")
             return False
+        
+        # NOUVEAU: Tracker la fermeture de bougie
+        self.last_candle_close_time = formatted_data['close_time']
+        
+        if config.DELAYED_SLTP_CONFIG.get('LOG_CANDLE_CLOSE_EVENTS', False):
+            print(f"🕐 Bougie fermée: {formatted_data['open_time']} -> {formatted_data['close_time']}")
         
         new_row_data = {
             'open_time': formatted_data['open_time'],
@@ -296,12 +309,35 @@ class HeikinAshiRSIBot:
             
             print(f"\n{config.COLORS['bold']}{config.COLORS['cyan']}🚀 EXÉCUTION TRADE AUTOMATIQUE {signal_type}{config.COLORS['reset']}")
             
-            # Exécuter le trade complet (avec vérification de type pour Pylance)
-            trade_result = self.trade_executor.execute_complete_trade(
-                side=signal_type,
-                candles_data=candles_data,
-                signal_data=signal_data
+            # NOUVEAU: Choisir la méthode d'exécution selon configuration
+            use_delayed_sltp = (
+                config.DELAYED_SLTP_CONFIG.get('ENABLED', False) and 
+                config.TRADING_CONFIG.get('USE_DELAYED_SLTP', False) and
+                self.trade_executor is not None and
+                hasattr(self.trade_executor, 'delayed_sltp_manager') and
+                self.trade_executor.delayed_sltp_manager is not None
             )
+            
+            if use_delayed_sltp and self.trade_executor is not None:
+                print(f"🕐 Mode SL/TP RETARDÉ activé")
+                # Utiliser la nouvelle méthode avec SL/TP retardé
+                trade_result = self.trade_executor.execute_complete_trade_with_delayed_sltp(
+                    side=signal_type,
+                    candles_data=candles_data,
+                    current_candle_time=self.current_candle_time,
+                    signal_data=signal_data
+                )
+            elif self.trade_executor is not None:
+                print(f"⚡ Mode SL/TP IMMÉDIAT (classique)")
+                # Utiliser la méthode classique
+                trade_result = self.trade_executor.execute_complete_trade(
+                    side=signal_type,
+                    candles_data=candles_data,
+                    signal_data=signal_data
+                )
+            else:
+                print("❌ TradeExecutor non disponible")
+                return False
             
             if trade_result and trade_result.get('status') == 'ACTIVE':
                 # Trade exécuté avec succès
@@ -324,7 +360,7 @@ class HeikinAshiRSIBot:
                 print(f"❌ {config.COLORS['red']}{error_msg}{config.COLORS['reset']}")
                 trading_logger.trade_failed(error_msg, signal_data)
                 return False
-                
+                    
         except Exception as e:
             error_msg = f"Erreur lors de l'exécution automatique: {str(e)}"
             print(f"❌ {error_msg}")
@@ -342,8 +378,48 @@ class HeikinAshiRSIBot:
         print(f"Take Profit: {config.COLORS['green']}{trade_result['take_profit_price']}{config.COLORS['reset']}")
         print(f"Risque: {config.COLORS['yellow']}{trade_result['risk_amount']:.2f} USDT{config.COLORS['reset']}")
         print(f"Profit potentiel: {config.COLORS['green']}{trade_result['potential_profit']:.2f} USDT{config.COLORS['reset']}")
+        
+        # NOUVEAU: Afficher le mode SL/TP
+        if trade_result.get('delayed_sltp', False):
+            print(f"Mode SL/TP: {config.COLORS['cyan']}🕐 RETARDÉ{config.COLORS['reset']} (après fermeture bougie)")
+        else:
+            print(f"Mode SL/TP: {config.COLORS['yellow']}⚡ IMMÉDIAT{config.COLORS['reset']}")
+        
         print(f"{config.COLORS['cyan']}═══════════════════════{config.COLORS['reset']}\n")
     
+    def _display_delayed_trades_status(self):
+        """Affiche le statut des trades avec SL/TP retardé"""
+        if (self.trade_executor is None or 
+            not hasattr(self.trade_executor, 'delayed_sltp_manager') or 
+            self.trade_executor.delayed_sltp_manager is None):
+            return
+        
+        try:
+            status = self.trade_executor.delayed_sltp_manager.get_pending_trades_status()
+            
+            if status['total_pending'] > 0:
+                print(f"\n{config.COLORS['cyan']}📅 TRADES AVEC SL/TP RETARDÉ:{config.COLORS['reset']}")
+                print(f"   Total: {status['total_pending']}")
+                print(f"   En attente bougie: {status['waiting_for_candle_close']}")
+                print(f"   Prêts traitement: {status['ready_for_processing']}")
+                print(f"   Terminés: {status['completed']}")
+                
+                # Afficher détails si peu de trades
+                if status['total_pending'] <= 3:
+                    for trade_id, trade_info in status['trades'].items():
+                        status_symbol = {
+                            'waiting': '⏳',
+                            'ready': '✅', 
+                            'completed': '🎯'
+                        }.get(trade_info['status'], '❓')
+                        
+                        side_color = config.COLORS['green'] if trade_info['side'] == 'LONG' else config.COLORS['red']
+                        print(f"   {status_symbol} {trade_id}: {side_color}{trade_info['side']}{config.COLORS['reset']} - {trade_info['status']}")
+                
+                print()
+        except Exception as e:
+            print(f"⚠️ Erreur affichage statut trades retardés: {e}")
+
     def calculate_and_display_indicators(self):
         """Calcule et affiche les indicateurs"""
         if self.df is None or len(self.df) < max(config.RSI_PERIODS) + 1:
@@ -508,7 +584,7 @@ class HeikinAshiRSIBot:
         if self.trading_enabled:
             trading_indicator = f" {config.COLORS['magenta']}🤖{config.COLORS['reset']}"
         
-        # NOUVEAU: Indicateur d'état connexion
+        # Indicateur d'état connexion
         connection_indicator = ""
         if self.connection_manager is not None:
             status = self.connection_manager.get_connection_status()
@@ -520,9 +596,64 @@ class HeikinAshiRSIBot:
             elif status['safe_mode_active']:
                 connection_indicator = f" {config.COLORS['cyan']}🛡️{config.COLORS['reset']}"
         
-        rsi_line = " | ".join(rsi_info)
-        print(f"[{timestamp}] {ha_symbol} {ha_color}{candle_color.upper()}{config.COLORS['reset']}{source_indicator} | RSI: {rsi_line}{signal_indicator}{trading_indicator}{connection_indicator}")
+        # NOUVEAU: Indicateur trades retardés
+        delayed_trades_indicator = ""
+        if (self.trade_executor is not None and 
+            hasattr(self.trade_executor, 'delayed_sltp_manager') and 
+            self.trade_executor.delayed_sltp_manager is not None):
+            try:
+                status = self.trade_executor.delayed_sltp_manager.get_pending_trades_status()
+                if status['total_pending'] > 0:
+                    pending_count = status['waiting_for_candle_close'] + status['ready_for_processing']
+                    if pending_count > 0:
+                        delayed_trades_indicator = f" {config.COLORS['cyan']}📅{pending_count}{config.COLORS['reset']}"
+            except Exception:
+                pass  # Ignorer erreur affichage
         
+        rsi_line = " | ".join(rsi_info)
+        print(f"[{timestamp}] {ha_symbol} {ha_color}{candle_color.upper()}{config.COLORS['reset']}{source_indicator} | RSI: {rsi_line}{signal_indicator}{trading_indicator}{connection_indicator}{delayed_trades_indicator}")
+
+    def handle_admin_commands(self, command):
+        """Gère les commandes administrateur pour le debug"""
+        if command.startswith('force_delayed_'):
+            # Commande: force_delayed_trade_123
+            try:
+                trade_id = command.replace('force_delayed_', '')
+                if (self.trade_executor is not None and 
+                    hasattr(self.trade_executor, 'delayed_sltp_manager') and 
+                    self.trade_executor.delayed_sltp_manager is not None):
+                    success = self.trade_executor.force_process_delayed_trade(trade_id)
+                    if success:
+                        print(f"✅ Traitement forcé du trade {trade_id}")
+                    else:
+                        print(f"❌ Échec traitement forcé du trade {trade_id}")
+                else:
+                    print("❌ Gestionnaire SL/TP retardé non disponible")
+            except Exception as e:
+                print(f"❌ Erreur commande: {e}")
+        
+        elif command == 'status_delayed':
+            # Afficher statut détaillé des trades retardés
+            self._display_delayed_trades_status()
+        
+        elif command == 'list_delayed':
+            # Lister tous les trades retardés
+            if (self.trade_executor is not None and 
+                hasattr(self.trade_executor, 'delayed_sltp_manager') and 
+                self.trade_executor.delayed_sltp_manager is not None):
+                try:
+                    status = self.trade_executor.get_complete_trading_status()
+                    print(f"📊 Statut complet:")
+                    print(f"Trades actifs: {len(status['active_trades'])}")
+                    if status['delayed_sltp_status']:
+                        delayed = status['delayed_sltp_status']
+                        print(f"Trades retardés: {delayed['total_pending']}")
+                        for trade_id, info in delayed['trades'].items():
+                            print(f"  - {trade_id}: {info['side']} ({info['status']})")
+                except Exception as e:
+                    print(f"❌ Erreur récupération statut: {e}")
+
+
     def should_display_results(self, signals_analysis):
         """Détermine si on doit afficher les résultats selon la configuration"""
         signal_valid = signals_analysis['valid']
@@ -772,7 +903,14 @@ class HeikinAshiRSIBot:
         else:
             print("           📊 MODE ANALYSE SEULEMENT")
         
-        # NOUVEAU: Affichage état ConnectionManager
+        # NOUVEAU: Affichage mode SL/TP
+        if self.trading_enabled and config.DELAYED_SLTP_CONFIG.get('ENABLED', False):
+            if config.TRADING_CONFIG.get('USE_DELAYED_SLTP', False):
+                print("        🕐 MODE SL/TP RETARDÉ ACTIVÉ")
+            else:
+                print("        ⚡ MODE SL/TP IMMÉDIAT")
+        
+        # Affichage état ConnectionManager
         if self.connection_manager is not None:
             print("        🔄 RECONNEXION AUTOMATIQUE ACTIVÉE")
         
@@ -785,7 +923,7 @@ class HeikinAshiRSIBot:
         print(f"  Périodes RSI: {config.RSI_PERIODS}")
         print(f"  Données historiques: {config.INITIAL_KLINES_LIMIT} bougies")
         
-        # NOUVEAU: Affichage configuration connexions
+        # Configuration du système de connexions
         if self.connection_manager is not None:
             print(f"\n{config.COLORS['cyan']}Configuration Connexions:{config.COLORS['reset']}")
             print(f"  Retry automatique: {config.CONNECTION_CONFIG.get('WEBSOCKET_RETRY_ENABLED', True)}")
@@ -801,6 +939,21 @@ class HeikinAshiRSIBot:
             print(f"  Stop Loss: {config.TRADING_CONFIG['STOP_LOSS_LOOKBACK_CANDLES']} bougies + {config.TRADING_CONFIG['STOP_LOSS_OFFSET_PERCENT']}%")
             print(f"  Type d'ordre: {config.TRADING_CONFIG['ENTRY_ORDER_TYPE']}")
             print(f"  Fallback Market: {config.TRADING_CONFIG.get('MARKET_FALLBACK_ENABLED', True)}")
+            
+            # CORRIGÉ: Configuration SL/TP retardé
+            if config.DELAYED_SLTP_CONFIG.get('ENABLED', False):
+                print(f"\n{config.COLORS['cyan']}Configuration SL/TP Retardé:{config.COLORS['reset']}")
+                print(f"  Mode retardé: {config.TRADING_CONFIG.get('USE_DELAYED_SLTP', False)}")
+                print(f"  Offset si dépassé: {config.DELAYED_SLTP_CONFIG.get('PRICE_OFFSET_PERCENT', 0.01)}%")
+                print(f"  Vérification: {config.DELAYED_SLTP_CONFIG.get('CHECK_INTERVAL_SECONDS', 10)}s")
+                print(f"  Fallback immédiat: {config.DELAYED_SLTP_CONFIG.get('FALLBACK_TO_IMMEDIATE', True)}")
+                
+                if (self.trade_executor is not None and 
+                    hasattr(self.trade_executor, 'delayed_sltp_manager') and 
+                    self.trade_executor.delayed_sltp_manager is not None):
+                    print(f"  🟢 Gestionnaire actif")
+                else:
+                    print(f"  🔴 Gestionnaire indisponible - Mode immédiat par défaut")
             
             # Afficher balance initiale
             if self.position_manager is not None:
@@ -823,7 +976,7 @@ class HeikinAshiRSIBot:
             self.on_kline_update
         )
         
-        # NOUVEAU: Attacher ConnectionManager au WebSocket
+        # Attacher ConnectionManager au WebSocket
         if self.connection_manager is not None:
             self.ws_handler.connection_manager = self.connection_manager
         
@@ -834,7 +987,7 @@ class HeikinAshiRSIBot:
             print(error_msg)
             trading_logger.error_occurred("WEBSOCKET_CONNECTION", error_msg)
             
-            # NOUVEAU: Même en cas d'échec initial, continuer si ConnectionManager disponible
+            # Même en cas d'échec initial, continuer si ConnectionManager disponible
             if self.connection_manager is not None:
                 print(f"{config.COLORS['yellow']}ConnectionManager va tenter des reconnexions automatiques...{config.COLORS['reset']}")
             else:
@@ -855,7 +1008,7 @@ class HeikinAshiRSIBot:
         # Initialiser compteur quotidien
         self.daily_trades_count = 0
         
-        # NOUVEAU: Synchronisation initiale si positions existantes
+        # Synchronisation initiale si positions existantes
         if self.connection_manager is not None and self.trading_enabled:
             print(f"\n{config.COLORS['cyan']}Vérification synchronisation initiale...{config.COLORS['reset']}")
             self.connection_manager.sync_state_after_reconnection()
@@ -882,7 +1035,7 @@ class HeikinAshiRSIBot:
                             self.trade_executor.close_all_positions()
                     finally:
                         self.signal_handler(None, None)
-                # NOUVEAU: La boucle continue même si WebSocket déconnecté
+                # La boucle continue même si WebSocket déconnecté
                 time.sleep(1)
         except KeyboardInterrupt:
             self.signal_handler(None, None)

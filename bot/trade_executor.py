@@ -12,6 +12,15 @@ from position_manager import PositionManager, load_api_credentials_from_env
 from retry_manager import RetryManager
 from trading_logger import trading_logger
 
+# 1. Import du nouveau module (ajouter en haut du fichier)
+try:
+    from delayed_sltp_manager import DelayedSLTPManager
+    DELAYED_SLTP_AVAILABLE = True
+    print("✅ DelayedSLTPManager disponible")
+except ImportError as e:
+    print(f"⚠️ DelayedSLTPManager non disponible: {e}")
+    DELAYED_SLTP_AVAILABLE = False
+
 class TradeExecutor:
     def __init__(self):
         """Initialise l'exécuteur de trades"""
@@ -34,6 +43,19 @@ class TradeExecutor:
             # Thread pour monitoring des ordres
             self.monitoring_active = False
             self.monitoring_thread = None
+            
+            # NOUVEAU: Gestionnaire SL/TP retardé
+            self.delayed_sltp_manager = None
+            if DELAYED_SLTP_AVAILABLE and config.DELAYED_SLTP_CONFIG.get('ENABLED', False):
+                try:
+                    self.delayed_sltp_manager = DelayedSLTPManager(self, None)
+                    print("✅ Gestion SL/TP retardée activée")
+                    trading_logger.info("Gestion SL/TP retardée activée")
+                except Exception as e:
+                    print(f"⚠️ Erreur initialisation SL/TP retardé: {e}")
+                    self.delayed_sltp_manager = None
+            else:
+                print("📊 Gestion SL/TP immédiate (mode classique)")
             
             print("✅ TradeExecutor initialisé avec succès")
             
@@ -467,6 +489,271 @@ class TradeExecutor:
             trading_logger.error_occurred("CANCEL_ORDER", str(e))
             return False
     
+    def execute_complete_trade_with_delayed_sltp(self, side, candles_data, current_candle_time, signal_data=None):
+        """
+        Exécute un trade complet avec gestion retardée des SL/TP
+        
+        Args:
+            side: 'LONG' ou 'SHORT'
+            candles_data: Données des bougies pour calcul SL
+            current_candle_time: Timestamp de la bougie actuelle d'entrée
+            signal_data: Données du signal (optionnel)
+            
+        Returns:
+            dict: Résultat du trade ou None si échec
+        """
+        try:
+            print(f"\n🚀 === EXECUTION TRADE {side} AVEC SL/TP RETARDÉ ===")
+            
+            # 1. Validation conditions
+            validation = self.position_manager.validate_trade_conditions()
+            if not validation['status']:
+                print(f"❌ Validation échouée: {validation['message']}")
+                trading_logger.trade_conditions_check(validation)
+                return None
+            
+            # 2. Récupération données de base
+            balance = self.position_manager.get_account_balance(config.ASSET_CONFIG['BALANCE_ASSET'])
+            current_price = self.get_current_price()
+            
+            if not current_price:
+                print("❌ Impossible de récupérer le prix actuel")
+                trading_logger.trade_failed("PRIX_ACTUEL_INDISPONIBLE", signal_data)
+                return None
+            
+            # 3. Calcul Stop Loss basé sur les bougies
+            sl_side = 'SHORT' if side == 'LONG' else 'LONG'
+            sl_price = self.position_manager.calculate_stop_loss_price(
+                candles_data, 
+                side,
+                config.TRADING_CONFIG['STOP_LOSS_LOOKBACK_CANDLES'],
+                config.TRADING_CONFIG['STOP_LOSS_OFFSET_PERCENT']
+            )
+            
+            if not sl_price:
+                print("❌ Impossible de calculer le Stop Loss")
+                trading_logger.trade_failed("CALCUL_SL_IMPOSSIBLE", signal_data)
+                return None
+            
+            # 4. Calcul taille de position
+            quantity = self.position_manager.calculate_position_size(
+                balance,
+                config.TRADING_CONFIG['RISK_PERCENT'],
+                current_price,
+                sl_price
+            )
+            
+            if quantity <= 0:
+                print("❌ Taille de position invalide")
+                trading_logger.trade_failed("TAILLE_POSITION_INVALIDE", signal_data)
+                return None
+            
+            # 5. Préparation ordre d'entrée
+            order_type = config.TRADING_CONFIG['ENTRY_ORDER_TYPE']
+            entry_side = 'BUY' if side == 'LONG' else 'SELL'
+            
+            limit_price = None
+            if order_type == 'LIMIT':
+                limit_price = self.calculate_limit_entry_price(
+                    entry_side,
+                    current_price,
+                    config.TRADING_CONFIG['LIMIT_SPREAD_PERCENT']
+                )
+            
+            # 6. Placement ordre d'entrée
+            entry_result = self.place_entry_order(entry_side, quantity, order_type, limit_price)
+            
+            if not entry_result:
+                print("❌ Échec placement ordre d'entrée")
+                trading_logger.trade_failed("ECHEC_ORDER_ENTREE", signal_data)
+                return None
+            
+            # 7. Attendre exécution si ordre LIMIT
+            if order_type == 'LIMIT' and entry_result['status'] == 'PENDING':
+                execution_result = self.wait_for_order_execution(
+                    entry_result['order_id'],
+                    config.TRADING_CONFIG['ORDER_EXECUTION_TIMEOUT']
+                )
+                
+                if execution_result and execution_result['status'] == 'FILLED':
+                    # Ordre LIMIT exécuté avec succès
+                    entry_result['executed_price'] = execution_result['executed_price']
+                    entry_result['executed_quantity'] = execution_result['executed_quantity']
+                    entry_result['status'] = 'FILLED'
+                    
+                elif execution_result and execution_result['status'] == 'TIMEOUT':
+                    # TIMEOUT - Tenter fallback MARKET si activé
+                    print(f"⏰ Ordre LIMIT timeout - Tentative fallback MARKET")
+                    trading_logger.timeout_order(entry_result['order_id'], 'LIMIT', config.TRADING_CONFIG['ORDER_EXECUTION_TIMEOUT'])
+                    
+                    fallback_result = self.execute_market_fallback(
+                        entry_side, 
+                        quantity, 
+                        'LIMIT'
+                    )
+                    
+                    if fallback_result and fallback_result['status'] == 'FILLED':
+                        # Fallback MARKET réussi
+                        entry_result = fallback_result
+                        print(f"✅ Fallback MARKET réussi - Trade continue")
+                        trading_logger.fallback_executed('MARKET', 'LIMIT')
+                    else:
+                        # Fallback échoué aussi
+                        print("❌ Fallback MARKET échoué - Trade abandonné")
+                        trading_logger.fallback_failed('MARKET', 'LIMIT', 'EXECUTION_ECHOUEE')
+                        return None
+                else:
+                    # Autre erreur d'exécution
+                    print("❌ Ordre d'entrée non exécuté - Trade abandonné")
+                    trading_logger.trade_failed("ENTREE_NON_EXECUTEE", signal_data)
+                    return None
+            
+            executed_price = entry_result['executed_price']
+            executed_quantity = entry_result['executed_quantity']
+            
+            print(f"✅ Entrée exécutée: {executed_quantity} @ {executed_price}")
+            
+            # 8. Calcul Take Profit basé sur prix d'exécution réel
+            tp_price = self.position_manager.calculate_take_profit_price(
+                executed_price,
+                side,
+                config.TRADING_CONFIG['TAKE_PROFIT_PERCENT']
+            )
+            
+            if not tp_price:
+                print("❌ Impossible de calculer le Take Profit")
+                self._emergency_close_position(entry_side, executed_quantity)
+                trading_logger.trade_failed("CALCUL_TP_IMPOSSIBLE", signal_data)
+                return None
+            
+            # 9. Créer un ID unique pour ce trade
+            self.trade_counter += 1
+            trade_id = f"trade_{self.trade_counter}_{int(time.time())}"
+            
+            # 10. NOUVEAU: Enregistrer le trade SANS placer SL/TP immédiatement
+            self.active_trades[trade_id] = {
+                'side': side,
+                'entry_side': entry_side,
+                'entry_order_id': entry_result['order_id'],
+                'entry_price': executed_price,
+                'quantity': executed_quantity,
+                'stop_loss_price': sl_price,  # Prix calculé original
+                'take_profit_price': tp_price,  # Prix calculé original
+                'stop_loss_order_id': None,  # Sera rempli après placement retardé
+                'take_profit_order_id': None,  # Sera rempli après placement retardé
+                'timestamp': datetime.now().isoformat(),
+                'signal_data': signal_data,
+                'delayed_sltp': True  # Marqueur pour gestion retardée
+            }
+            
+            # 11. NOUVEAU: Enregistrer pour gestion retardée des SL/TP
+            if self.delayed_sltp_manager:
+                delayed_success = self.delayed_sltp_manager.register_trade_for_delayed_sltp(
+                    trade_result={
+                        'trade_id': trade_id,
+                        'side': side,
+                        'entry_price': executed_price,
+                        'quantity': executed_quantity
+                    },
+                    entry_candle_time=current_candle_time,
+                    original_sl_price=sl_price,
+                    original_tp_price=tp_price
+                )
+                
+                if delayed_success:
+                    print(f"📅 Trade {trade_id} enregistré pour SL/TP retardé")
+                    print(f"   ⏰ SL/TP seront placés après fermeture de la bougie d'entrée")
+                    trading_logger.info(f"Trade {trade_id} en attente de SL/TP retardé")
+                else:
+                    print(f"⚠️ Erreur enregistrement SL/TP retardé - Placement immédiat en fallback")
+                    # Fallback: placement immédiat si erreur
+                    self._place_immediate_sltp_fallback(trade_id, side, executed_quantity, sl_price, tp_price)
+            else:
+                # Pas de gestion retardée disponible - placement immédiat
+                print(f"📊 Gestion retardée non disponible - Placement SL/TP immédiat")
+                self._place_immediate_sltp_fallback(trade_id, side, executed_quantity, sl_price, tp_price)
+            
+            # 12. Démarrer monitoring si pas déjà actif
+            if not self.monitoring_active:
+                self.start_order_monitoring()
+            
+            # 13. Résultat final
+            trade_result = {
+                'trade_id': trade_id,
+                'status': 'ACTIVE',
+                'side': side,
+                'entry_price': executed_price,
+                'quantity': executed_quantity,
+                'stop_loss_price': sl_price,  # Prix original calculé
+                'take_profit_price': tp_price,  # Prix original calculé
+                'risk_amount': abs(executed_price - sl_price) * executed_quantity,
+                'potential_profit': abs(tp_price - executed_price) * executed_quantity,
+                'delayed_sltp': self.delayed_sltp_manager is not None
+            }
+            
+            print(f"✅ Trade {trade_id} créé avec succès!")
+            print(f"   Entrée: {executed_price}")
+            print(f"   SL calculé: {sl_price}")
+            print(f"   TP calculé: {tp_price}")
+            print(f"   Risque: {trade_result['risk_amount']:.2f}")
+            print(f"   Profit potentiel: {trade_result['potential_profit']:.2f}")
+            
+            if self.delayed_sltp_manager:
+                print(f"   🕐 Mode: SL/TP retardé après fermeture bougie")
+            else:
+                print(f"   ⚡ Mode: SL/TP immédiat")
+            
+            return trade_result
+            
+        except Exception as e:
+            error_msg = f"Erreur exécution trade retardé: {str(e)}"
+            print(f"❌ {error_msg}")
+            trading_logger.trade_failed(error_msg, signal_data)
+            return None
+
+    # 4. NOUVELLE FONCTION _place_immediate_sltp_fallback
+    def _place_immediate_sltp_fallback(self, trade_id, side, quantity, sl_price, tp_price):
+        """
+        Placement immédiat des SL/TP en cas de fallback
+        (Méthode de secours si gestion retardée non disponible)
+        """
+        try:
+            print(f"⚡ Placement SL/TP immédiat pour {trade_id} (fallback)")
+            
+            # Côtés des ordres (opposés à l'entrée)
+            sl_order_side = 'SELL' if side == 'LONG' else 'BUY'
+            tp_order_side = 'SELL' if side == 'LONG' else 'BUY'
+            
+            # Placement Stop Loss
+            sl_order_id = self.place_stop_loss_order(
+                sl_order_side,
+                quantity,
+                sl_price,
+                trade_id
+            )
+            
+            # Placement Take Profit  
+            tp_order_id = self.place_take_profit_order(
+                tp_order_side,
+                quantity,
+                tp_price,
+                trade_id
+            )
+            
+            if sl_order_id and tp_order_id:
+                print(f"✅ SL/TP immédiat placé avec succès")
+                # Marquer comme non-retardé
+                if trade_id in self.active_trades:
+                    self.active_trades[trade_id]['delayed_sltp'] = False
+            else:
+                print(f"⚠️ Échec placement SL/TP immédiat - Position sans protection!")
+                trading_logger.warning(f"SL_TP_IMMEDIATE_FAILED pour {trade_id}")
+                
+        except Exception as e:
+            error_msg = f"Erreur placement SL/TP immédiat: {str(e)}"
+            print(f"❌ {error_msg}")
+            trading_logger.error_occurred("IMMEDIATE_SLTP_FALLBACK", error_msg)
+
     def execute_complete_trade(self, side, candles_data, signal_data=None):
         """
         Exécute un trade complet: entrée + SL + TP
@@ -808,7 +1095,37 @@ class TradeExecutor:
         self.monitoring_active = False
         if self.monitoring_thread and self.monitoring_thread.is_alive():
             self.monitoring_thread.join(timeout=5)
+        
+        # CORRIGÉ: Arrêter aussi le monitoring SL/TP retardé
+        if (hasattr(self, 'delayed_sltp_manager') and 
+            self.delayed_sltp_manager is not None):
+            self.delayed_sltp_manager.stop_monitoring()
+    
         print("🛑 Monitoring arrêté")
+            
+    # 6. NOUVELLE FONCTION get_complete_trading_status
+    def get_complete_trading_status(self):
+        """Retourne un statut complet incluant les trades retardés"""
+        status = {
+            'active_trades': self.get_active_trades(),
+            'delayed_sltp_status': None
+        }
+        
+        if (hasattr(self, 'delayed_sltp_manager') and 
+            self.delayed_sltp_manager is not None):
+            status['delayed_sltp_status'] = self.delayed_sltp_manager.get_pending_trades_status()
+        
+        return status
+
+    # 7. NOUVELLE FONCTION force_process_delayed_trade
+    def force_process_delayed_trade(self, trade_id):
+        """Force le traitement d'un trade avec SL/TP retardé"""
+        if (not hasattr(self, 'delayed_sltp_manager') or 
+            self.delayed_sltp_manager is None):
+            print("❌ Gestionnaire SL/TP retardé non disponible")
+            return False
+        
+        return self.delayed_sltp_manager.force_process_trade(trade_id)
     
     def close_all_positions(self):
         """Ferme toutes les positions et annule tous les ordres"""

@@ -156,7 +156,7 @@ class DirectTradeTest:
             try:
                 # Vérifier le statut
                 if hasattr(self.trade_executor, 'delayed_sltp_manager'):
-                    status = self.trade_executor.delayed_sltp_manager.get_pending_trades_status()
+                    status = self.trade_executor.delayed_sltp_manager.get_pending_trades_status() # pyright: ignore[reportOptionalMemberAccess]
                     
                     print(f"\n📊 Statut à {datetime.now().strftime('%H:%M:%S')}:")
                     print(f"   Total trades: {status['total_pending']}")
@@ -284,7 +284,7 @@ def run_interactive_test():
                 tester.run_complete_test("SHORT")
             elif choice == "3":
                 if hasattr(tester.trade_executor, 'delayed_sltp_manager'):
-                    status = tester.trade_executor.delayed_sltp_manager.get_pending_trades_status()
+                    status = tester.trade_executor.delayed_sltp_manager.get_pending_trades_status() # pyright: ignore[reportOptionalMemberAccess]
                     print(f"\n📊 Statut trades retardés:")
                     print(f"   Total: {status['total_pending']}")
                     for trade_id, info in status['trades'].items():

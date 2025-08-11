@@ -156,9 +156,10 @@ class DelayedSLTPManager:
         
         print("🛑 Monitoring SL/TP retardé arrêté")
     
+    
     def _process_delayed_trade(self, trade_id):
         """
-        Traite un trade dont la bougie d'entrée est fermée
+        Traite un trade dont la bougie d'entrée est fermée - VERSION CORRIGÉE
         
         Args:
             trade_id: ID du trade à traiter
@@ -168,15 +169,31 @@ class DelayedSLTPManager:
                 return
             
             trade_info = self.pending_trades[trade_id]
+            
+            # NOUVEAU: Vérifier si déjà traité pour éviter duplication
+            if trade_info.get('sl_tp_placed', False):
+                print(f"⚠️ Trade {trade_id} déjà traité - Skip duplication")
+                return
+            
+            # NOUVEAU: Vérifier si en cours de traitement
+            if trade_info.get('processing_started'):
+                print(f"⚠️ Trade {trade_id} en cours de traitement - Skip")
+                return
+            
             trade_result = trade_info['trade_result']
             
             print(f"\n🕐 TRAITEMENT TRADE RETARDÉ: {trade_id}")
             print(f"   Bougie d'entrée fermée, placement SL/TP...")
             
+            # NOUVEAU: Marquer comme en cours de traitement IMMÉDIATEMENT
+            trade_info['processing_started'] = datetime.now()
+            
             # Récupérer le prix actuel
             current_price = self.trade_executor.get_current_price()
             if not current_price:
                 print(f"❌ Impossible de récupérer le prix actuel pour {trade_id}")
+                # Rollback
+                trade_info.pop('processing_started', None)
                 return
             
             print(f"📊 Prix actuel: {current_price}")
@@ -194,12 +211,15 @@ class DelayedSLTPManager:
             if not adjusted_sl_price or not adjusted_tp_price:
                 print(f"❌ Impossible de calculer SL/TP ajustés pour {trade_id}")
                 trading_logger.error_occurred("DELAYED_SLTP_CALC", f"Calcul SL/TP ajustés échoué pour {trade_id}")
+                # Rollback
+                trade_info.pop('processing_started', None)
                 return
             
             # Placement des ordres
             success = self._place_delayed_orders(trade_id, trade_result, adjusted_sl_price, adjusted_tp_price)
             
             if success:
+                # NOUVEAU: Marquer comme terminé APRÈS succès
                 trade_info['sl_tp_placed'] = True
                 trade_info['final_sl_price'] = adjusted_sl_price
                 trade_info['final_tp_price'] = adjusted_tp_price
@@ -208,6 +228,8 @@ class DelayedSLTPManager:
                 print(f"✅ SL/TP retardés placés pour {trade_id}")
                 trading_logger.info(f"SL/TP retardés placés pour {trade_id} - SL: {adjusted_sl_price}, TP: {adjusted_tp_price}")
             else:
+                # ROLLBACK en cas d'échec
+                trade_info.pop('processing_started', None)
                 print(f"❌ Échec placement SL/TP retardés pour {trade_id}")
                 trading_logger.error_occurred("DELAYED_SLTP_PLACEMENT", f"Échec placement pour {trade_id}")
             
@@ -215,6 +237,12 @@ class DelayedSLTPManager:
             error_msg = f"Erreur traitement trade retardé {trade_id}: {str(e)}"
             print(f"❌ {error_msg}")
             trading_logger.error_occurred("DELAYED_SLTP_PROCESS", error_msg)
+            
+            # ROLLBACK en cas d'exception
+            if trade_id in self.pending_trades:
+                self.pending_trades[trade_id].pop('processing_started', None)
+                self.pending_trades[trade_id]['sl_tp_placed'] = False
+
     
     def _calculate_adjusted_sl_price(self, trade_info, current_price, trade_result):
         """
@@ -466,10 +494,29 @@ class DelayedSLTPManager:
         return status
     
     def force_process_trade(self, trade_id):
-        """Force le traitement d'un trade spécifique"""
+        """Force le traitement d'un trade spécifique - AVEC PROTECTION DUPLICATION"""
         if trade_id not in self.pending_trades:
             print(f"❌ Trade {trade_id} non trouvé dans les trades en attente")
             return False
+        
+        trade_info = self.pending_trades[trade_id]
+        
+        # Vérifier si déjà traité
+        if trade_info.get('sl_tp_placed', False):
+            print(f"⚠️ Trade {trade_id} déjà traité - SL/TP déjà placés")
+            return True
+        
+        # Vérifier si en cours de traitement
+        if trade_info.get('processing_started'):
+            processing_time = trade_info['processing_started']
+            elapsed = (datetime.now() - processing_time).total_seconds()
+            if elapsed < 30:  # Moins de 30 secondes
+                print(f"⚠️ Trade {trade_id} en cours de traitement depuis {elapsed:.0f}s")
+                return False
+            else:
+                print(f"⚠️ Trade {trade_id} bloqué depuis {elapsed:.0f}s - Force traitement")
+                # Reset pour débloquer
+                trade_info.pop('processing_started', None)
         
         print(f"🔄 Traitement forcé du trade {trade_id}")
         self._process_delayed_trade(trade_id)

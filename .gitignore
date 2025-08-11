@@ -221,3 +221,4 @@ temp/*
 
 # ignorer toutes les instances de bot
 bot_*/*
+config_*/*

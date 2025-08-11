@@ -43,50 +43,44 @@ class DelayedSLTPManager:
         trading_logger.info("DelayedSLTPManager initialisé")
     
     def register_trade_for_delayed_sltp(self, trade_result, entry_candle_time, original_sl_price, original_tp_price):
-        """
-        Enregistre un trade pour la gestion retardée des SL/TP
-        
-        Args:
-            trade_result: Résultat du trade (contient trade_id, side, etc.)
-            entry_candle_time: Timestamp de la bougie d'entrée
-            original_sl_price: Prix SL calculé original
-            original_tp_price: Prix TP calculé original
-        """
+        """FIXED: Utilise l'heure locale au lieu des timestamps Binance"""
         try:
             trade_id = trade_result['trade_id']
             
-            # Calculer le temps de fin de la bougie d'entrée
+            # CORRECTION: Utiliser l'heure locale actuelle
+            current_time = datetime.now()  # Au lieu de entry_candle_time (UTC Binance)
+            
             timeframe = config.ASSET_CONFIG['TIMEFRAME']
             candle_duration = self._get_candle_duration_seconds(timeframe)
-            end_of_candle = entry_candle_time + timedelta(seconds=candle_duration)
+            end_of_candle = current_time + timedelta(seconds=candle_duration)
             
-            # Enregistrer le trade en attente
+            print(f"🔧 FIX TIMEZONE APPLIQUÉ:")
+            print(f"   Binance timestamp: {entry_candle_time}")
+            print(f"   Heure locale: {current_time}")
+            print(f"   Fin bougie (corrigée): {end_of_candle}")
+            print(f"   Attente: {candle_duration}s ({timeframe})")
+            
             self.pending_trades[trade_id] = {
                 'trade_result': trade_result,
-                'entry_candle_time': entry_candle_time,
-                'end_of_candle_time': end_of_candle,
+                'entry_candle_time': current_time,  # ← HEURE LOCALE
+                'end_of_candle_time': end_of_candle,  # ← LOCALE + DURÉE
                 'original_sl_price': original_sl_price,
                 'original_tp_price': original_tp_price,
                 'sl_tp_placed': False,
-                'registration_time': datetime.now()
+                'processing_started': None,
+                'registration_time': current_time
             }
             
-            print(f"📅 Trade {trade_id} enregistré pour SL/TP retardé")
-            print(f"   Bougie d'entrée: {entry_candle_time}")
-            print(f"   Attente jusqu'à: {end_of_candle}")
+            print(f"📅 Trade {trade_id} enregistré (TIMEZONE FIXED)")
+            trading_logger.info(f"Trade {trade_id} retardé jusqu'à {end_of_candle}")
             
-            trading_logger.info(f"Trade {trade_id} enregistré pour SL/TP retardé - Attente jusqu'à {end_of_candle}")
-            
-            # Démarrer le monitoring si pas déjà actif
             if not self.monitoring_active:
                 self.start_monitoring()
             
             return True
             
         except Exception as e:
-            error_msg = f"Erreur enregistrement trade retardé: {str(e)}"
-            print(f"❌ {error_msg}")
-            trading_logger.error_occurred("DELAYED_SLTP_REGISTER", error_msg)
+            print(f"❌ Erreur: {e}")
             return False
     
     def _get_candle_duration_seconds(self, timeframe):

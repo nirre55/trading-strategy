@@ -4,7 +4,7 @@ Module d'exécution des trades avec gestion des ordres
 import os
 import time
 import threading
-from datetime import datetime
+from datetime import datetime, timedelta, timezone  # Ajouter timezone ici
 from binance.client import Client
 from binance.exceptions import BinanceAPIException
 import config
@@ -492,6 +492,7 @@ class TradeExecutor:
     def execute_complete_trade_with_delayed_sltp(self, side, candles_data, current_candle_time, signal_data=None):
         """
         Exécute un trade complet avec gestion retardée des SL/TP
+        CORRIGÉ: Vérification stricte des positions avant ouverture
         
         Args:
             side: 'LONG' ou 'SHORT'
@@ -505,6 +506,41 @@ class TradeExecutor:
         try:
             print(f"\n🚀 === EXECUTION TRADE {side} AVEC SL/TP RETARDÉ ===")
             
+            # NOUVEAU: Vérification stricte des positions AVANT tout
+            if self.position_manager is None:
+                print("❌ Position Manager non disponible")
+                return None
+                
+            current_positions = self.position_manager.get_current_positions()
+            symbol_positions = [p for p in current_positions if p['symbol'] == config.ASSET_CONFIG['SYMBOL']]
+            
+            max_positions = config.TRADING_CONFIG.get('MAX_POSITIONS', 1)
+            
+            if len(symbol_positions) >= max_positions:
+                error_msg = f"MAX_POSITIONS atteinte: {len(symbol_positions)}/{max_positions}"
+                print(f"🚫 {error_msg}")
+                trading_logger.warning(f"Trade refusé - {error_msg}")
+                
+                # Afficher les positions existantes
+                for pos in symbol_positions:
+                    print(f"   Position existante: {pos['side']} {pos['size']} @ {pos['entry_price']}")
+                
+                return None
+            
+            # NOUVEAU: Vérifier aussi les trades en cours dans active_trades
+            active_count = len([t for t in self.active_trades.values() 
+                            if t.get('status') != 'CLOSED'])
+            if active_count >= max_positions:
+                error_msg = f"Trades actifs: {active_count}/{max_positions}"
+                print(f"🚫 {error_msg}")
+                trading_logger.warning(f"Trade refusé - {error_msg}")
+                
+                # Afficher les trades actifs
+                for tid, tinfo in self.active_trades.items():
+                    if tinfo.get('status') != 'CLOSED':
+                        print(f"   Trade actif: {tid} - {tinfo['side']} @ {tinfo['entry_price']}")
+                
+                return None
             # 1. Validation conditions
             validation = self.position_manager.validate_trade_conditions()
             if not validation['status']:
@@ -1001,7 +1037,7 @@ class TradeExecutor:
     def monitor_orders_and_cleanup(self):
         """
         Surveille les ordres SL/TP et nettoie automatiquement
-        Fonction exécutée dans un thread séparé
+        CORRIGÉ: Marque les trades fermés pour le cleanup du delayed manager
         """
         print("👁️ Démarrage monitoring des ordres...")
         
@@ -1023,24 +1059,58 @@ class TradeExecutor:
                         if sl_status == 'FILLED':
                             sl_executed = True
                             print(f"🛡️ Stop Loss déclenché pour {trade_id}")
+                            trading_logger.stop_loss_hit(trade_id, trade_info.get('stop_loss_price'))
                     
                     if tp_order_id:
                         tp_status = self._check_order_status(tp_order_id)
                         if tp_status == 'FILLED':
                             tp_executed = True
                             print(f"🎯 Take Profit atteint pour {trade_id}")
+                            trading_logger.take_profit_hit(trade_id, trade_info.get('take_profit_price'))
                     
                     # Nettoyage si un ordre est exécuté
                     if sl_executed or tp_executed:
                         self._cleanup_trade(trade_id, sl_executed, tp_executed)
+                        
+                        # NOUVEAU: Notifier le delayed manager si présent
+                        self._notify_delayed_manager_trade_closed(trade_id, sl_executed, tp_executed)
                 
                 time.sleep(5)  # Vérifier toutes les 5 secondes
                 
             except Exception as e:
                 print(f"❌ Erreur monitoring: {e}")
-                time.sleep(10)  # Attendre plus longtemps en cas d'erreur
+                time.sleep(10)
         
         print("👁️ Monitoring des ordres arrêté")
+
+    def _notify_delayed_manager_trade_closed(self, trade_id, sl_executed, tp_executed):
+        """
+        Notifie le delayed manager qu'un trade est fermé
+        """
+        try:
+            # Vérifier que delayed_sltp_manager existe et n'est pas None
+            if not hasattr(self, 'delayed_sltp_manager'):
+                return
+                
+            if self.delayed_sltp_manager is None:
+                return
+            
+            # Vérifier que pending_trades existe
+            if not hasattr(self.delayed_sltp_manager, 'pending_trades'):
+                return
+                
+            # Maintenant on peut accéder en toute sécurité
+            if trade_id in self.delayed_sltp_manager.pending_trades:
+                trade_info = self.delayed_sltp_manager.pending_trades[trade_id]
+                trade_info['position_closed'] = True
+                trade_info['close_reason'] = 'STOP_LOSS' if sl_executed else 'TAKE_PROFIT'
+                trade_info['close_time'] = datetime.now(timezone.utc)
+                print(f"📝 Trade {trade_id} marqué comme fermé dans delayed manager")
+                
+        except AttributeError as e:
+            print(f"⚠️ Delayed manager non disponible: {e}")
+        except Exception as e:
+            print(f"⚠️ Erreur notification delayed manager: {e}")
     
     def _check_order_status(self, order_id):
         """Vérifie le status d'un ordre"""

@@ -25,7 +25,7 @@ SHOW_DEBUG = False
 DOUBLE_HEIKIN_ASHI_FILTER = {
     'ENABLED': True,  # True pour activer le double calcul HA
     'USE_FOR_SIGNALS': True,  # True: utiliser HA2 pour les signaux, False: garder HA1
-    'USE_FOR_RSI': False,  # True: calculer RSI sur HA2, False: calculer RSI sur HA1
+    'USE_FOR_RSI': True,  # True: calculer RSI sur HA2, False: calculer RSI sur HA1
     'SHOW_BOTH_IN_DISPLAY': True,  # True: afficher HA1 et HA2, False: afficher seulement celui utilisé
     'DESCRIPTION': 'Double Heikin Ashi: Calcul HA sur les données HA pour plus de lissage',
     
@@ -78,15 +78,24 @@ SIGNAL_SETTINGS = {
 # Configuration Trading avancée
 TRADING_CONFIG = {
     'ENABLED': True,                       # Trading automatique (désactivé par défaut)
-    'RISK_PERCENT': 5.0,                   # % du capital par trade
+    'RISK_PERCENT': 2.0,                   # % du capital par trade
     
     # Configuration Take Profit (fixe depuis entrée)
     'TAKE_PROFIT_PERCENT': 0.15,            # TP à 0.15% depuis prix entrée
 
-    # Configuration Stop Loss (basé sur bougies)
+    
+    # NOUVEAU: Gestion du risque
+    'MAX_RISK_TOLERANCE': 1.5,             # Tolérance max: x le risque configuré
+    'AUTO_ADJUST_SL_FOR_RISK': False,      # Ajuster auto le SL si risque trop élevé
+    'MIN_SL_DISTANCE_PERCENT': 0.03,       # Distance minimale SL: 0.3%
     'STOP_LOSS_LOOKBACK_CANDLES': 5,       # Regarder 5 dernières bougies
     'STOP_LOSS_OFFSET_PERCENT': 0.1,       # Offset 0.1% depuis low/high trouvé
+    'MAX_POSITION_PERCENT': 3.0,           # Max 3% du capital en risque
     
+    # Notional et limites
+    'MIN_TRADE_SIZE_USDT': 5.0,            # Taille minimum de trade
+    'SKIP_TRADE_IF_RISK_HIGH': True,       # Skip si risque > tolérance
+
     # Configuration ordres
     'ENTRY_ORDER_TYPE': 'LIMIT',           # MARKET ou LIMIT
     'LIMIT_SPREAD_PERCENT': 0.01,          # 0.01% pour prix limit
@@ -152,18 +161,25 @@ RETRY_CONFIG = {
     'STATUS_CHECK_DELAY': 2,             # Délai entre lectures de statut
 }
 
+TIMEZONE_CONFIG = {
+    'LOCAL_TIMEZONE': 'America/Toronto',  # Remplacez par votre timezone
+    # Exemples: 'Europe/Paris', 'America/New_York', 'Asia/Tokyo'
+    'BINANCE_TIMEZONE': 'UTC',  # Ne pas changer - Binance utilise UTC
+}
+
 # Configuration SL/TP retardé
 DELAYED_SLTP_CONFIG = {
-    'ENABLED': True,                    # Activer la gestion retardée des SL/TP
-    'PRICE_OFFSET_PERCENT': 0.01,      # Offset à appliquer si prix dépassé (0.01% = 1 pip)
-    'CHECK_INTERVAL_SECONDS': 10,      # Intervalle de vérification en secondes
-    'AUTO_CLEANUP_HOURS': 24,          # Nettoyage automatique après X heures
-    'LOG_DETAILED_CALCULATIONS': True, # Log détaillé des calculs d'ajustement
+    'ENABLED': True,
+    'PRICE_OFFSET_PERCENT': 0.05,      # Augmenté à 0.05% (était 0.01%)
+    'CHECK_INTERVAL_SECONDS': 10,
+    'AUTO_CLEANUP_HOURS': 2,           # Réduit à 2h (était 24h)
+    'LOG_DETAILED_CALCULATIONS': True,
     
     # Comportement avancé
-    'FALLBACK_TO_IMMEDIATE': True,     # Si erreur, revenir au placement immédiat
-    'MAX_OFFSET_PERCENT': 0.05,        # Offset maximum autorisé (sécurité)
-    'MIN_TIME_BEFORE_PLACEMENT': 30,   # Délai minimum avant placement (secondes)
+    'FALLBACK_TO_IMMEDIATE': True,
+    'MAX_OFFSET_PERCENT': 0.5,         # Offset maximum 0.5%
+    'MIN_TIME_BEFORE_PLACEMENT': 5,    # Réduit à 5s (était 30s)
+    'MIN_DISTANCE_PERCENT': 0.05,      # Distance minimale SL/prix: 0.05%
     
     # Options de log spécifiques
     'LOG_CANDLE_CLOSE_EVENTS': True,   # Logger les fermetures de bougies

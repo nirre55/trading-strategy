@@ -164,13 +164,14 @@ class PositionManager:
     def calculate_stop_loss_price(self, candles_data, side, lookback_candles, offset_percent):
         """
         Calcule le prix de Stop Loss basé sur les bougies historiques
+        CORRIGÉ: Meilleur calcul pour SHORT avec protection minimale
         
         Args:
             candles_data: Liste des dernières bougies (dict avec 'high', 'low')
             side: 'LONG' ou 'SHORT'
             lookback_candles: Nombre de bougies à analyser
             offset_percent: Pourcentage d'offset à ajouter
-        
+            
         Returns:
             Prix de stop loss formaté
         """
@@ -182,19 +183,41 @@ class PositionManager:
             # Prendre les dernières bougies
             recent_candles = candles_data[-lookback_candles:]
             
+            # NOUVEAU: Protection minimale selon config
+            min_sl_distance_percent = config.TRADING_CONFIG.get('MIN_SL_DISTANCE_PERCENT', 0.2)  # 0.2% minimum
+            
             if side == 'LONG':
                 # Pour LONG: SL en dessous du plus bas low
                 lowest_low = min(float(candle['low']) for candle in recent_candles)
                 sl_price = lowest_low - (lowest_low * offset_percent / 100)
-                print(f"📉 LONG SL: Plus bas des {lookback_candles} bougies = {lowest_low}")
-                print(f"   SL avec offset {offset_percent}% = {sl_price}")
+                
+                # Vérifier distance minimale
+                current_price = float(candles_data[-1]['close'])
+                distance_percent = ((current_price - sl_price) / current_price) * 100
+                
+                if distance_percent < min_sl_distance_percent:
+                    # Forcer distance minimale
+                    sl_price = current_price * (1 - min_sl_distance_percent / 100)
+                    print(f"📉 LONG SL ajusté pour distance minimale {min_sl_distance_percent}%")
+                
+                print(f"📉 LONG SL: Plus bas = {lowest_low}, Final = {sl_price}")
                 
             else:  # SHORT
                 # Pour SHORT: SL au dessus du plus haut high
                 highest_high = max(float(candle['high']) for candle in recent_candles)
                 sl_price = highest_high + (highest_high * offset_percent / 100)
-                print(f"📈 SHORT SL: Plus haut des {lookback_candles} bougies = {highest_high}")
-                print(f"   SL avec offset {offset_percent}% = {sl_price}")
+                
+                # IMPORTANT: Vérifier distance minimale pour SHORT
+                current_price = float(candles_data[-1]['close'])
+                distance_percent = ((sl_price - current_price) / current_price) * 100
+                
+                if distance_percent < min_sl_distance_percent:
+                    # Forcer distance minimale
+                    sl_price = current_price * (1 + min_sl_distance_percent / 100)
+                    print(f"📈 SHORT SL ajusté pour distance minimale {min_sl_distance_percent}%")
+                
+                print(f"📈 SHORT SL: Plus haut = {highest_high}, Final = {sl_price}")
+                print(f"   Distance du prix actuel: {distance_percent:.2f}%")
             
             return self.format_price(sl_price)
             
@@ -202,7 +225,7 @@ class PositionManager:
             print(f"❌ Erreur calcul Stop Loss: {e}")
             trading_logger.error_occurred("CALCUL_SL", str(e))
             return None
-    
+        
     def calculate_take_profit_price(self, entry_price, side, tp_percent):
         """
         Calcule le prix de Take Profit fixe depuis le prix d'entrée
@@ -238,6 +261,7 @@ class PositionManager:
     def calculate_position_size(self, balance, risk_percent, entry_price, stop_loss_price):
         """
         Calcule la taille de position basée sur le risk management
+        CORRIGÉ: Respecte toujours le risque maximum même avec notional minimum
         
         Args:
             balance: Balance disponible
@@ -246,7 +270,7 @@ class PositionManager:
             stop_loss_price: Prix de stop loss
             
         Returns:
-            Quantité formatée selon les règles du symbole
+            Quantité formatée selon les règles du symbole ou 0 si impossible
         """
         try:
             balance = float(balance)
@@ -254,8 +278,8 @@ class PositionManager:
             entry_price = float(entry_price)
             stop_loss_price = float(stop_loss_price)
             
-            # Montant à risquer
-            risk_amount = balance * risk_percent / 100
+            # Montant maximum à risquer
+            max_risk_amount = balance * risk_percent / 100
             
             # Distance entre entrée et SL
             price_diff = abs(entry_price - stop_loss_price)
@@ -264,26 +288,70 @@ class PositionManager:
                 print("❌ Différence de prix nulle entre entrée et SL")
                 return 0
             
-            # Quantité = Montant_risque / Distance_prix
-            quantity = risk_amount / price_diff
+            # Distance en pourcentage
+            distance_percent = (price_diff / entry_price) * 100
+            
+            # Quantité idéale basée sur le risque
+            ideal_quantity = max_risk_amount / price_diff
             
             print(f"💼 Calcul position:")
-            print(f"   Balance: {balance} | Risque: {risk_percent}% = {risk_amount}")
-            print(f"   Distance prix: {price_diff}")
-            print(f"   Quantité brute: {quantity}")
+            print(f"   Balance: {balance:.2f} USDT")
+            print(f"   Risque configuré: {risk_percent}% = {max_risk_amount:.2f} USDT max")
+            print(f"   Distance SL: {price_diff:.6f} ({distance_percent:.3f}%)")
+            print(f"   Quantité idéale: {ideal_quantity:.4f}")
             
-            # Formatter et vérifier limites
-            formatted_quantity = self.format_quantity(quantity)
+            # Formatter selon les règles du symbole
+            formatted_quantity = self.format_quantity(ideal_quantity)
             
             # Vérifier notional minimum
             notional = formatted_quantity * entry_price
             min_notional = self.symbol_info_cache.get('min_notional', 5.0)
             
             if notional < min_notional:
-                print(f"⚠️ Notional {notional} < minimum {min_notional}")
-                # Ajuster la quantité au minimum notional
-                formatted_quantity = self.format_quantity(min_notional / entry_price)
-                print(f"   Quantité ajustée: {formatted_quantity}")
+                print(f"⚠️ Notional {notional:.2f} < minimum {min_notional}")
+                
+                # Calculer la quantité minimum requise
+                min_quantity = self.format_quantity(min_notional / entry_price)
+                
+                # NOUVEAU: Calculer le risque réel avec la quantité minimum
+                real_risk_with_min = min_quantity * price_diff
+                
+                print(f"   Quantité minimum requise: {min_quantity}")
+                print(f"   Risque réel avec minimum: {real_risk_with_min:.2f} USDT")
+                
+                # PROTECTION: Vérifier si le risque réel est acceptable
+                max_acceptable_risk = max_risk_amount * 1.5  # Tolérance 50% au-dessus
+                
+                if real_risk_with_min > max_acceptable_risk:
+                    print(f"❌ TRADE REJETÉ: Risque {real_risk_with_min:.2f} > Max acceptable {max_acceptable_risk:.2f}")
+                    print(f"   Solution: Augmenter la distance du SL ou attendre un meilleur signal")
+                    
+                    # Option: Forcer un SL plus éloigné pour respecter le risque
+                    if config.TRADING_CONFIG.get('AUTO_ADJUST_SL_FOR_RISK', False):
+                        # Calculer la distance SL nécessaire pour respecter le risque
+                        required_distance = max_risk_amount / min_quantity
+                        required_sl_percent = (required_distance / entry_price) * 100
+                        
+                        print(f"   📊 Distance SL requise: {required_sl_percent:.3f}% pour respecter le risque")
+                        
+                        # Retourner 0 pour rejeter le trade
+                        return 0
+                    else:
+                        # Rejeter le trade
+                        return 0
+                else:
+                    # Risque acceptable même avec quantité minimum
+                    print(f"✅ Quantité ajustée au minimum: {min_quantity}")
+                    formatted_quantity = min_quantity
+            
+            # Calcul final du risque réel
+            real_risk = formatted_quantity * price_diff
+            print(f"   📊 Risque réel final: {real_risk:.2f} USDT ({real_risk/balance*100:.2f}% du capital)")
+            
+            # Dernière vérification de sécurité
+            if real_risk > balance * 0.05:  # Max 5% du capital par trade
+                print(f"❌ SÉCURITÉ: Risque {real_risk:.2f} > 5% du capital")
+                return 0
             
             return formatted_quantity
             
